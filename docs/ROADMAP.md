@@ -235,3 +235,28 @@ Wenn eine Beta-Funktion sich bei der Testgruppe bewährt hat, wird **nicht der g
 - **Sammelposten / Sammelabschreibung (§6 Abs. 2a EStG)** – Wahlrecht für bewegliche Wirtschaftsgüter zwischen 250 € und 1.000 € netto: Pool pro Wirtschaftsjahr, pauschale Auflösung über 5 Jahre à 20 % (Anlage EÜR Zeile 37, Hilfsblatt Zeilen 63–81). Braucht eigene mehrjährige Pool-Verwaltung (ähnlich Anlagenverzeichnis, aber pro Jahrgang statt pro Einzelgut) – deutlich aufwändiger als die übrige EÜR/AVEÜR-Logik. Zurückgestellt bis explizit nachgefragt (Issue #265, Diskussion 2026-07).
 
 - **MCP-Server** (Issue #429) – eigener Model-Context-Protocol-Server, der die Backend-API (Rechnung erstellen, Zahlung erfassen, Journal abfragen etc.) als Tools für KI-Assistenten (z. B. Claude) exponiert. Vorschlag bisher sehr knapp, kein konkreter Anwendungsfall genannt – Rückfrage im Issue gestellt, Umfang/Priorität noch unklar.
+
+- **Bestellwesen (Einkauf)** – Spiegelbild zu Angebot/Auftrag auf der Lieferantenseite, als
+  Schalter unter Funktionen: Bestellung an Lieferanten als eigener Dokumenttyp (Nummernkreis z. B.
+  `BE-YY####`, PDF, Mailversand), Status offen → teilweise geliefert → geliefert; **Wareneingang**
+  erhöht den Lagerbestand (bisher wird er nur beim Verkauf fortgeschrieben, Lagerführung #173);
+  Eingangsrechnung aus der Bestellung vorbefüllen inkl. Abgleich Bestellung ↔ Rechnung;
+  Bestellvorschlag aus Mindestbestand (Dashboard-Lagerwarnung → direkt Bestellung).
+  Offen: nur Händler mit Lager oder auch Materialbestellungen von Dienstleistern für Aufträge?
+
+- **Seriennummernverwaltung** – baut auf dem Bestellwesen (Wareneingang) und der Lagerführung auf:
+  Artikel „seriennummernpflichtig“; Erfassen beim Wareneingang oder manuell, Bestand = freie
+  Seriennummern; beim Verkauf je Position so viele Seriennummern wie Menge zuordnen, auf PDF und
+  optional in der E-Rechnung (ZUGFeRD-Produktinstanz); Rückverfolgung per Suche (Einkauf, an
+  welchen Kunden, mit welcher Rechnung – Gewährleistung, Garantie, Rückruf); Storno/Gutschrift
+  gibt die Seriennummer wieder frei; passt zu §25a (Gebrauchtwarenhandel).
+  Offen: nur Rückverfolgung oder auch Garantiefristen mit Ablauf und Erinnerung?
+
+- **Öffentliche REST-API** – das Backend ist intern bereits eine REST-API (FastAPI, ~300 Endpunkte),
+  aber unversioniert, ohne Anmeldung und auf zufälligem Port. Für Dritte nötig: stabile, versionierte
+  Schnittstelle `/api/v1/…` mit OpenAPI-Doku (entkoppelt von der internen), API-Tokens mit Rechten
+  (lesen / schreiben), in den Einstellungen erzeug- und widerrufbar; feste Adresse, standardmäßig
+  nur lokal, optional im Netzwerk; Schreibzugriffe über dieselben Wege wie die Oberfläche (GoBD,
+  Nummernkreise, Signaturen). Einschränkung Desktop-App: nur erreichbar, solange RechnungsFee läuft.
+  **Grundlage für MCP-Server (#429) und hellocash-Anbindung (#13)**, statt dass beide eigene Wege gehen.
+  Offen: Hauptzweck (Shop legt Rechnungen an, eigene Skripte/Auswertungen, Anbindung anderer Programme)?
