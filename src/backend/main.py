@@ -34,7 +34,7 @@ logging.root.addHandler(_log_handler)
 from database.seed import run_all_seeds
 from api import unternehmen, konten, kategorien, setup, journal, kunden, lieferanten, tagesabschluss, nummernkreise, export, rechnungen, backup, artikel, artikel_gruppen, ust_saetze, pdf_vorlagen, eks, system, ustva, zm, euer, dokumentenpakete, mail, wiederkehrend, buchungsvorlagen, anlageverzeichnis, datev, anlage_s, anlage_g, fristen_api, guv, bank_templates, bank_import, auto_filter, forderungen, cockpit, datenmigration, kontenuebersicht, schnellbuchungen, mahnwesen, profile, kontokorrent, inventurliste, postfach
 
-SCHEMA_VERSION = 170
+SCHEMA_VERSION = 171
 
 app = FastAPI(title="RechnungsFee API", version="0.1.0")
 
@@ -3786,6 +3786,26 @@ def _run_migrations() -> None:
             conn.execute(text("PRAGMA user_version = 170"))
             conn.commit()
             print("[Migration] Schema auf Version 170 (Issue #451: Rechnungspostfach per IMAP – unternehmen.postfach_aktiv/imap_*)")
+
+        if version < 171:
+            # Issue #451: Mail wird erst beim Übernehmen verschoben - dafür muss sie wiederauffindbar sein
+            cols171 = {r[1] for r in conn.execute(text("PRAGMA table_info(postfach_eingang)")).fetchall()}
+            if cols171:   # Tabelle existiert (create_all legt sie auf neuen DBs bereits vollständig an)
+                for col, typ in (
+                    ("mail_ordner",      "VARCHAR(200)"),
+                    ("mail_uidvalidity", "VARCHAR(32)"),
+                    ("mail_uid",         "VARCHAR(32)"),
+                    ("mail_message_id",  "VARCHAR(500)"),
+                ):
+                    if col not in cols171:
+                        conn.execute(text(f"ALTER TABLE postfach_eingang ADD COLUMN {col} {typ}"))
+            # Abrufstand (Ordner/UIDVALIDITY/letzte geprüfte UID als JSON) - nur neue Mails prüfen
+            cols171_u = {r[1] for r in conn.execute(text("PRAGMA table_info(unternehmen)")).fetchall()}
+            if "imap_abruf_stand" not in cols171_u:
+                conn.execute(text("ALTER TABLE unternehmen ADD COLUMN imap_abruf_stand TEXT"))
+            conn.execute(text("PRAGMA user_version = 171"))
+            conn.commit()
+            print("[Migration] Schema auf Version 171 (Issue #451: postfach_eingang.mail_ordner/uidvalidity/uid/message_id)")
 
 
 def _migrate_kategorien() -> None:

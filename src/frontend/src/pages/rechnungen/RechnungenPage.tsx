@@ -4488,14 +4488,17 @@ function LieferantVorschlagBox({ vorschlaege }: { vorschlaege: LieferantVorschla
 function PostfachDialog({
   onClose,
   onUebernehmen,
+  meldung,
 }: {
   onClose: () => void
   onUebernehmen: (eintrag: PostfachEintrag) => void
+  // Rückmeldung zur gerade gespeicherten Rechnung (z. B. Mail konnte nicht verschoben werden)
+  meldung?: string | null
 }) {
   const qc = useQueryClient()
   const { data: eintraege, isLoading } = useQuery({ queryKey: ['postfach-eingang'], queryFn: getPostfachEingang })
   const [abrufErgebnis, setAbrufErgebnis] = useState<PostfachAbrufErgebnis | null>(null)
-  const [fehlerText, setFehlerText] = useState<string | null>(null)
+  const [fehlerText, setFehlerText] = useState<string | null>(meldung ?? null)
   const [verwerfenId, setVerwerfenId] = useState<number | null>(null)
   const [ladeId, setLadeId] = useState<number | null>(null)
 
@@ -4506,7 +4509,11 @@ function PostfachDialog({
   })
   const verwerfenMut = useMutation({
     mutationFn: (id: number) => postfachVerwerfen(id),
-    onSuccess: () => { setVerwerfenId(null); qc.invalidateQueries({ queryKey: ['postfach-eingang'] }) },
+    onSuccess: (r) => {
+      setVerwerfenId(null)
+      if (r.hinweis) setFehlerText(r.hinweis)
+      qc.invalidateQueries({ queryKey: ['postfach-eingang'] })
+    },
     onError: (e: Error) => setFehlerText(e.message),
   })
 
@@ -4543,10 +4550,11 @@ function PostfachDialog({
           {abrufErgebnis && (
             <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-600 dark:text-slate-300 space-y-1">
               <p>
-                {abrufErgebnis.mails_geprueft} Mail{abrufErgebnis.mails_geprueft === 1 ? '' : 's'} geprüft ·{' '}
-                <strong>{abrufErgebnis.neu} neue Rechnung{abrufErgebnis.neu === 1 ? '' : 'en'}</strong>
-                {abrufErgebnis.dubletten > 0 && <> · {abrufErgebnis.dubletten} bereits bekannt</>}
-                {abrufErgebnis.mails_verschoben > 0 && <> · {abrufErgebnis.mails_verschoben} nach „RechnungsFee/verarbeitet“ verschoben</>}
+                {abrufErgebnis.mails_geprueft === 0
+                  ? 'Keine neuen Mails seit dem letzten Abruf.'
+                  : <>{abrufErgebnis.mails_geprueft} neue Mail{abrufErgebnis.mails_geprueft === 1 ? '' : 's'} geprüft ·{' '}
+                      <strong>{abrufErgebnis.neu} neue Rechnung{abrufErgebnis.neu === 1 ? '' : 'en'}</strong>
+                      {abrufErgebnis.dubletten > 0 && <> · {abrufErgebnis.dubletten} bereits bekannt</>}</>}
               </p>
               {abrufErgebnis.weitere_mails && <p className="text-amber-700 dark:text-amber-300">Es liegen noch weitere Mails im Ordner – bitte erneut abrufen.</p>}
               {abrufErgebnis.uebersprungen.map((h, i) => <p key={i} className="text-amber-700 dark:text-amber-300">⚠ {h}</p>)}
@@ -4598,8 +4606,10 @@ function PostfachDialog({
           )}
           <p className="text-xs text-slate-400 dark:text-slate-500">
             „Übernehmen" öffnet den gewohnten Import mit dieser Datei – du prüfst die erkannten Daten und speicherst wie
-            beim Einzelimport, die Datei wird als Beleg angehängt. „Verwerfen" ist für Anhänge, die keine Rechnung sind
-            (z. B. AGB); sie werden beim nächsten Abruf nicht erneut angeboten.
+            beim Einzelimport, die Datei wird als Beleg angehängt. Danach wandert die Mail im Postfach in den Ordner
+            „RechnungsFee/verarbeitet“ und dieses Fenster öffnet sich für die nächste Rechnung wieder.
+            „Verwerfen" ist für Anhänge, die keine Rechnung sind (z. B. AGB) – die Mail bleibt im Posteingang, wird aber
+            nicht erneut angeboten.
           </p>
         </div>
       </div>
@@ -5012,6 +5022,7 @@ export function RechnungenPage({ modus = 'rechnungen' }: { modus?: 'rechnungen' 
   // Issue #451: Import aus dem Postfach-Eingang - Startdatei für den Import-Dialog und Eintrag,
   // der nach dem Speichern als übernommen markiert wird
   const [zeigPostfach, setZeigPostfach] = useState(false)
+  const [postfachMeldung, setPostfachMeldung] = useState<string | null>(null)
   const [importStartDatei, setImportStartDatei] = useState<File | null>(null)
   const [importPostfachId, setImportPostfachId] = useState<number | null>(null)
   const [activeVorlageId, setActiveVorlageId] = useState<number | null>(null)
@@ -5099,9 +5110,20 @@ export function RechnungenPage({ modus = 'rechnungen' }: { modus?: 'rechnungen' 
         setImportDatei(null)
       }
       if (importPostfachId) {
-        try { await postfachUebernommen(importPostfachId, r.id) } catch {}
+        // Eintrag erledigt + Mail verschieben, danach direkt mit der nächsten Rechnung weiter
+        let hinweis: string | null = null
+        try {
+          hinweis = (await postfachUebernommen(importPostfachId, r.id)).hinweis ?? null
+        } catch (e) {
+          hinweis = `Die Rechnung ist gespeichert, der Postfach-Eintrag konnte aber nicht abgeschlossen werden: ${(e as Error).message}`
+        }
         setImportPostfachId(null)
-        qc.invalidateQueries({ queryKey: ['postfach-eingang'] })
+        await qc.invalidateQueries({ queryKey: ['postfach-eingang'] })
+        const nochOffen = (await getPostfachEingang().catch(() => [])).length
+        if (nochOffen > 0 || hinweis) {
+          setPostfachMeldung(hinweis)
+          setZeigPostfach(true)
+        }
       }
       if (activeVorlageId) {
         try { await erledigtVorlage(activeVorlageId) } catch {}
@@ -5255,11 +5277,13 @@ export function RechnungenPage({ modus = 'rechnungen' }: { modus?: 'rechnungen' 
     <div className="flex h-full">
       {zeigPostfach && (
         <PostfachDialog
-          onClose={() => setZeigPostfach(false)}
+          meldung={postfachMeldung}
+          onClose={() => { setZeigPostfach(false); setPostfachMeldung(null) }}
           onUebernehmen={async (eintrag) => {
             try {
               const datei = await ladePostfachDatei(eintrag)
               setZeigPostfach(false)
+              setPostfachMeldung(null)
               setImportPostfachId(eintrag.id)
               setImportStartDatei(datei)
               setZeigImport(true)

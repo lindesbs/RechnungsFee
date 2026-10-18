@@ -2,13 +2,16 @@
 Rechnungspostfach per IMAP (Issue #451, Stufe 1).
 
 Abruf: PDF-/XML-Anhänge aus dem eingestellten Ordner landen in der Importliste
-(postfach_eingang); die verarbeitete Mail wird in den Unterordner "RechnungsFee/verarbeitet"
-verschoben. Mails ohne passenden Anhang bleiben unberührt (BODY.PEEK - auch der Gelesen-Status
-ändert sich nicht).
+(postfach_eingang). Die Mail selbst bleibt dabei unverändert im Postfach (BODY.PEEK - auch der
+Gelesen-Status ändert sich nicht). Geprüft werden nur Mails seit dem letzten Abruf
+(unternehmen.imap_abruf_stand); vollständig geladen nur solche, deren BODYSTRUCTURE einen
+möglichen PDF-/XML-Anhang zeigt.
 
 Übernahme: bewusst KEINE automatische Erfassung - das Frontend holt die Datei und startet damit
 den unveränderten Einzelimport (Analyse → Formular → Prüfung → Speichern → Beleg). Danach wird
-der Eintrag per /uebernommen als erledigt markiert.
+der Eintrag per /uebernommen als erledigt markiert - erst DANN wird die Mail in den Unterordner
+"RechnungsFee/verarbeitet" verschoben (sobald kein Anhang derselben Mail mehr offen ist).
+Verworfene Mails bleiben im Posteingang.
 
 Sicherheit: Das Postfach ist von außen beschreibbar - deshalb nur PDF/XML, Größenlimits, nie
 automatische Buchungen. Zertifikats-Pinning (Trust on First Use) analog zum SMTP-Versand (#336).
@@ -19,6 +22,7 @@ import email
 import email.policy
 import hashlib
 import imaplib
+import json
 import re
 import socket
 import ssl
@@ -67,12 +71,16 @@ class PostfachEintrag(BaseModel):
 
 
 class AbrufErgebnis(BaseModel):
-    mails_geprueft: int
-    mails_verschoben: int
-    neu: int
-    dubletten: int
+    mails_geprueft: int             # neue Mails seit dem letzten Abruf
+    neu: int                        # neue Einträge in der Importliste
+    dubletten: int                  # Anhänge, die schon in der Liste oder als Beleg vorhanden sind
     uebersprungen: list[str] = []   # Hinweise zu Mails, die nicht verarbeitet werden konnten
-    weitere_mails: bool = False     # mehr als MAX_MAILS_PRO_ABRUF im Ordner
+    weitere_mails: bool = False     # Limit erreicht - erneut abrufen
+
+
+class EintragMitHinweis(PostfachEintrag):
+    # z. B. "Mail konnte nicht verschoben werden" - die Übernahme selbst ist trotzdem erledigt
+    hinweis: Optional[str] = None
 
 
 class TestErgebnis(BaseModel):
@@ -321,35 +329,97 @@ def postfach_testen(db: Session = Depends(get_db)):
             pass
 
 
+# Möglicher Rechnungsanhang laut BODYSTRUCTURE - großzügig (octet-stream, Dateiendung), damit
+# nichts übersehen wird; die eigentliche Prüfung macht _anhaenge() nach dem Laden der Mail.
+_KANDIDAT_RE = re.compile(
+    rb'"APPLICATION"\s+"(?:PDF|X-PDF|XML|OCTET-STREAM)"|"TEXT"\s+"XML"|\.(?:PDF|XML)"', re.IGNORECASE,
+)
+_SATZ_START_RE = re.compile(rb"^\d+ \(")
+
+
+def _fetch_datensaetze(daten) -> list[bytes]:
+    """imaplib-FETCH-Antwort (gemischte bytes/tuple-Teile bei Literalen) pro Mail zusammenfügen."""
+    saetze: list[bytes] = []
+    for teil in daten or []:
+        if isinstance(teil, tuple):
+            stueck = b"".join(x for x in teil if isinstance(x, bytes))
+            kopf = teil[0] if teil and isinstance(teil[0], bytes) else b""
+        elif isinstance(teil, bytes):
+            stueck = kopf = teil
+        else:
+            continue
+        if _SATZ_START_RE.match(kopf) or not saetze:
+            saetze.append(stueck)
+        else:
+            saetze[-1] += stueck
+    return saetze
+
+
+def _neue_mails(m: imaplib.IMAP4, ab_uid: int) -> list[tuple[int, int, bool]]:
+    """(UID, Größe, möglicher Rechnungsanhang) aller Mails mit UID > ab_uid, aufsteigend."""
+    typ, daten = m.uid("FETCH", f"{ab_uid + 1}:*", "(UID RFC822.SIZE BODYSTRUCTURE)")
+    if typ != "OK":
+        return []
+    mails = []
+    for satz in _fetch_datensaetze(daten):
+        uid = re.search(rb"UID (\d+)", satz)
+        if not uid or int(uid.group(1)) <= ab_uid:   # "N:*" liefert bei N > max die letzte Mail
+            continue
+        groesse = re.search(rb"RFC822\.SIZE (\d+)", satz)
+        mails.append((int(uid.group(1)), int(groesse.group(1)) if groesse else 0, bool(_KANDIDAT_RE.search(satz))))
+    return sorted(mails)
+
+
+def _uidvalidity(m: imaplib.IMAP4) -> Optional[str]:
+    typ, daten = m.response("UIDVALIDITY")
+    return _text(daten) if daten and daten[0] else None
+
+
+def _lese_stand(u: Unternehmen, ordner: str, uidvalidity: Optional[str]) -> int:
+    try:
+        stand = json.loads(u.imap_abruf_stand or "{}")
+    except ValueError:
+        return 0
+    if stand.get("ordner") != ordner or stand.get("uidvalidity") != uidvalidity:
+        return 0   # anderer Ordner oder Server hat die UIDs neu vergeben → von vorn (Message-ID schützt vor Doppelten)
+    return int(stand.get("uid") or 0)
+
+
 @router.post("/abrufen", response_model=AbrufErgebnis)
 def postfach_abrufen(db: Session = Depends(get_db)):
     u = _einstellungen(db)
     m = _verbinde(u, db)
-    ergebnis = AbrufErgebnis(mails_geprueft=0, mails_verschoben=0, neu=0, dubletten=0)
+    ergebnis = AbrufErgebnis(mails_geprueft=0, neu=0, dubletten=0)
+    ordner = u.imap_ordner or "INBOX"
     try:
-        _ordner_auswaehlen(m, u.imap_ordner or "INBOX")
-        typ, daten = m.uid("SEARCH", None, "ALL")
-        uids = (daten[0] or b"").split() if typ == "OK" and daten else []
-        if len(uids) > MAX_MAILS_PRO_ABRUF:
-            ergebnis.weitere_mails = True
-            uids = uids[:MAX_MAILS_PRO_ABRUF]   # älteste zuerst; Rest beim nächsten Abruf
-        ziel: Optional[str] = None
+        _ordner_auswaehlen(m, ordner, readonly=True)   # readonly: der Abruf verändert nichts im Postfach
+        uidvalidity = _uidvalidity(m)
+        stand = _lese_stand(u, ordner, uidvalidity)
+        geladen = 0
 
-        for uid in uids:
+        for uid, groesse, kandidat in _neue_mails(m, stand):
+            if kandidat and geladen >= MAX_MAILS_PRO_ABRUF:
+                ergebnis.weitere_mails = True
+                break
             ergebnis.mails_geprueft += 1
-            typ, groesse_daten = m.uid("FETCH", uid, "(RFC822.SIZE)")
-            groesse = re.search(rb"RFC822\.SIZE (\d+)", groesse_daten[0] if groesse_daten and isinstance(groesse_daten[0], bytes) else b"")
-            if groesse and int(groesse.group(1)) > MAX_MAIL_BYTES:
-                ergebnis.uebersprungen.append(f"Mail UID {_text(uid)} ist größer als {MAX_MAIL_BYTES // 1024 // 1024} MB – übersprungen.")
+            stand = uid
+            if not kandidat:
+                continue   # kein Rechnungsanhang - Mail bleibt unberührt
+            if groesse > MAX_MAIL_BYTES:
+                ergebnis.uebersprungen.append(f"Eine Mail ist größer als {MAX_MAIL_BYTES // 1024 // 1024} MB – übersprungen.")
                 continue
-            typ, roh = m.uid("FETCH", uid, "(BODY.PEEK[])")
+            geladen += 1
+            typ, roh = m.uid("FETCH", str(uid), "(BODY.PEEK[])")
             mail_bytes = next((t[1] for t in (roh or []) if isinstance(t, tuple) and len(t) > 1), None)
             if typ != "OK" or not mail_bytes:
                 continue
             msg = email.message_from_bytes(mail_bytes, policy=email.policy.default)
+            message_id = (str(msg.get("Message-ID", "")).strip() or None)
+            if message_id and db.query(PostfachEingang.id).filter(PostfachEingang.mail_message_id == message_id).first():
+                continue   # schon in der Liste (z. B. nach geändertem Abrufstand)
             anhaenge = _anhaenge(msg)
             if not anhaenge:
-                continue   # Mails ohne Rechnungsanhang bleiben unberührt
+                continue
 
             absender = str(msg.get("From", ""))[:300] or None
             betreff = str(msg.get("Subject", ""))[:500] or None
@@ -376,21 +446,62 @@ def postfach_abrufen(db: Session = Depends(get_db)):
                 db.add(PostfachEingang(
                     sha256=sha, datei_pfad=rel.as_posix(), original_name=name[:255], mime_type=mime,
                     dateigroesse=len(inhalt), absender=absender, betreff=betreff, mail_datum=mail_datum,
+                    mail_ordner=ordner, mail_uidvalidity=uidvalidity, mail_uid=str(uid),
+                    mail_message_id=message_id[:500] if message_id else None,
                 ))
                 db.commit()
                 ergebnis.neu += 1
 
-            # Erst verschieben, wenn alle Anhänge gesichert sind
-            if ziel is None:
-                ziel = _zielordner_anlegen(m)
-            try:
-                _verschiebe(m, uid, ziel)
-                ergebnis.mails_verschoben += 1
-            except Exception as e:
-                ergebnis.uebersprungen.append(
-                    f'Mail „{betreff or "ohne Betreff"}" wurde übernommen, konnte aber nicht verschoben werden: {e}'
-                )
+        u.imap_abruf_stand = json.dumps({"ordner": ordner, "uidvalidity": uidvalidity, "uid": stand})
+        db.commit()
         return ergebnis
+    finally:
+        try:
+            m.logout()
+        except Exception:
+            pass
+
+
+def _gleiche_mail(e: PostfachEingang):
+    if e.mail_message_id:
+        return PostfachEingang.mail_message_id == e.mail_message_id
+    return ((PostfachEingang.mail_ordner == e.mail_ordner)
+            & (PostfachEingang.mail_uidvalidity == e.mail_uidvalidity)
+            & (PostfachEingang.mail_uid == e.mail_uid))
+
+
+def _mail_abschliessen(e: PostfachEingang, db: Session) -> Optional[str]:
+    """Verschiebt die Mail nach "RechnungsFee/verarbeitet", sobald kein Anhang derselben Mail mehr
+    offen ist und mindestens einer übernommen wurde. Nur verworfene Mails bleiben im Posteingang.
+    Gibt bei einem Problem einen Hinweis zurück - die Übernahme selbst ist davon nicht betroffen."""
+    if not e.mail_ordner:
+        return None
+    geschwister = db.query(PostfachEingang).filter(_gleiche_mail(e)).all()
+    if any(g.status == "offen" for g in geschwister) or not any(g.status == "uebernommen" for g in geschwister):
+        return None
+    ziel_anzeige = "/".join(ZIEL_TEILE)
+    try:
+        u = _einstellungen(db)
+        m = _verbinde(u, db)
+    except HTTPException as ex:
+        return f"Die Mail wurde nicht nach „{ziel_anzeige}“ verschoben: {ex.detail}"
+    try:
+        typ, _ = m.select(_q(e.mail_ordner))
+        if typ != "OK":
+            return f"Die Mail wurde nicht verschoben: Ordner „{e.mail_ordner}“ nicht gefunden."
+        uid: Optional[str] = None
+        if e.mail_uid and _uidvalidity(m) == e.mail_uidvalidity:
+            uid = e.mail_uid
+        elif e.mail_message_id:
+            typ, daten = m.uid("SEARCH", None, "HEADER", "Message-ID", _q(e.mail_message_id))
+            treffer = (daten[0] or b"").split() if typ == "OK" and daten else []
+            uid = _text(treffer[-1]) if treffer else None
+        if uid is None:
+            return "Die Mail wurde im Postfach nicht mehr gefunden und deshalb nicht verschoben."
+        _verschiebe(m, uid, _zielordner_anlegen(m))
+        return None
+    except Exception as ex:
+        return f"Die Mail konnte nicht nach „{ziel_anzeige}“ verschoben werden: {_text(ex)}"
     finally:
         try:
             m.logout()
@@ -429,10 +540,10 @@ def postfach_datei(eintrag_id: int, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/eingang/{eintrag_id}/uebernommen", response_model=PostfachEintrag)
+@router.post("/eingang/{eintrag_id}/uebernommen", response_model=EintragMitHinweis)
 def postfach_uebernommen(eintrag_id: int, body: UebernommenRequest, db: Session = Depends(get_db)):
-    """Nach erfolgreichem Einzelimport: Eintrag erledigt. Die Datei hängt dann als Beleg an der
-    Rechnung - die Postfach-Kopie wird nicht mehr gebraucht."""
+    """Nach erfolgreichem Einzelimport: Eintrag erledigt (die Datei hängt dann als Beleg an der
+    Rechnung) und die Mail wandert nach "RechnungsFee/verarbeitet"."""
     e = _eintrag(eintrag_id, db)
     if body.rechnung_id is not None and not db.query(Rechnung.id).filter(Rechnung.id == body.rechnung_id).first():
         raise HTTPException(404, "Rechnung nicht gefunden.")
@@ -440,19 +551,22 @@ def postfach_uebernommen(eintrag_id: int, body: UebernommenRequest, db: Session 
     e.rechnung_id = body.rechnung_id
     _datei_entfernen(e)
     db.commit()
+    hinweis = _mail_abschliessen(e, db)
     db.refresh(e)
-    return e
+    return EintragMitHinweis.model_validate(e).model_copy(update={"hinweis": hinweis})
 
 
-@router.post("/eingang/{eintrag_id}/verwerfen", response_model=PostfachEintrag)
+@router.post("/eingang/{eintrag_id}/verwerfen", response_model=EintragMitHinweis)
 def postfach_verwerfen(eintrag_id: int, db: Session = Depends(get_db)):
-    """Kein Rechnungsbeleg (z. B. AGB, Werbung). Zeile bleibt als Dublettenschutz bestehen."""
+    """Kein Rechnungsbeleg (z. B. AGB, Werbung). Zeile bleibt als Dublettenschutz bestehen, die
+    Mail bleibt im Posteingang - außer ein anderer Anhang derselben Mail wurde übernommen."""
     e = _eintrag(eintrag_id, db)
     e.status = "verworfen"
     _datei_entfernen(e)
     db.commit()
+    hinweis = _mail_abschliessen(e, db)
     db.refresh(e)
-    return e
+    return EintragMitHinweis.model_validate(e).model_copy(update={"hinweis": hinweis})
 
 
 def _datei_entfernen(e: PostfachEingang) -> None:

@@ -2258,7 +2258,6 @@ export type PostfachEintrag = {
 
 export type PostfachAbrufErgebnis = {
   mails_geprueft: number
-  mails_verschoben: number
   neu: number
   dubletten: number
   uebersprungen: string[]
@@ -2272,13 +2271,15 @@ export const postfachAbrufen = () =>
 export const getPostfachEingang = () =>
   request<PostfachEintrag[]>('/postfach/eingang')
 export const postfachDateiPfad = (id: number) => `/postfach/eingang/${id}/datei`
+// hinweis: z. B. "Mail konnte nicht verschoben werden" - Übernahme/Verwerfen ist trotzdem erledigt
+export type PostfachEintragMitHinweis = PostfachEintrag & { hinweis?: string | null }
 export const postfachUebernommen = (id: number, rechnungId: number | null) =>
-  request<PostfachEintrag>(`/postfach/eingang/${id}/uebernommen`, {
+  request<PostfachEintragMitHinweis>(`/postfach/eingang/${id}/uebernommen`, {
     method: 'POST',
     body: JSON.stringify({ rechnung_id: rechnungId }),
   })
 export const postfachVerwerfen = (id: number) =>
-  request<PostfachEintrag>(`/postfach/eingang/${id}/verwerfen`, { method: 'POST' })
+  request<PostfachEintragMitHinweis>(`/postfach/eingang/${id}/verwerfen`, { method: 'POST' })
 
 /** Datei eines Postfach-Eintrags als File holen - für den unveränderten Einzelimport. */
 export async function ladePostfachDatei(e: PostfachEintrag): Promise<File> {

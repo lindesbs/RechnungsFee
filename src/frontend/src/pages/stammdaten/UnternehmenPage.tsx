@@ -1625,9 +1625,9 @@ function PostfachSektion({ data }: { data: Unternehmen }) {
           <p className="text-xs text-slate-500 dark:text-slate-400">
             PDF- und XML-Anhänge aus diesem Postfach landen unter <strong>Eingangsrechnungen → Postfach</strong> in einer
             Importliste. Jede Rechnung übernimmst du von dort einzeln – genau wie beim Import einer einzelnen Datei.
-            Verarbeitete Mails verschiebt RechnungsFee in den Unterordner „RechnungsFee/verarbeitet“, Mails ohne
-            Rechnungsanhang bleiben unberührt. Am besten ein eigenes Postfach oder einen eigenen Ordner nur für
-            Eingangsrechnungen verwenden.
+            Erst nach der Übernahme verschiebt RechnungsFee die Mail in den Unterordner „RechnungsFee/verarbeitet“
+            (wird bei Bedarf angelegt). Verworfene Mails und Mails ohne Rechnungsanhang bleiben im Posteingang.
+            Am besten ein eigenes Postfach oder einen eigenen Ordner nur für Eingangsrechnungen verwenden.
           </p>
 
           <div className="grid grid-cols-3 gap-3">

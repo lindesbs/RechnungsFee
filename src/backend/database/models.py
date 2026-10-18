@@ -165,6 +165,8 @@ class Unternehmen(Base):
     # Trust-on-First-Use analog SMTP (Issue #336) - eigener Fingerabdruck, IMAP-Server kann ein anderer sein
     imap_zertifikat_ignorieren: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
     imap_zertifikat_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    # interner Abrufstand {"ordner", "uidvalidity", "uid"} - nur Mails danach werden geprüft
+    imap_abruf_stand: Mapped[str | None] = mapped_column(Text)
     zugferd_anhaenge_aktiv: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
     unterschrift_bild: Mapped[str | None] = mapped_column(Text)           # base64-PNG
     unterschrift_auf_rechnung: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
@@ -634,6 +636,12 @@ class PostfachEingang(Base):
     absender: Mapped[str | None] = mapped_column(String(300))
     betreff: Mapped[str | None] = mapped_column(String(500))
     mail_datum: Mapped[datetime | None] = mapped_column(DateTime)
+    # Wiederfinden der Mail beim Übernehmen (dann erst wird sie verschoben): UID gilt nur solange
+    # UIDVALIDITY des Ordners unverändert ist, sonst Suche per Message-ID
+    mail_ordner: Mapped[str | None] = mapped_column(String(200))
+    mail_uidvalidity: Mapped[str | None] = mapped_column(String(32))
+    mail_uid: Mapped[str | None] = mapped_column(String(32))
+    mail_message_id: Mapped[str | None] = mapped_column(String(500))
     status: Mapped[str] = mapped_column(String(20), default="offen", server_default="offen", nullable=False)  # offen|uebernommen|verworfen
     rechnung_id: Mapped[int | None] = mapped_column(ForeignKey("rechnungen.id", ondelete="SET NULL"))
     erstellt_am: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
