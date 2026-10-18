@@ -60,6 +60,31 @@ Schlussrechnung. Nicht vorher geplant, kam während der Entwicklung über Issue 
 
 ---
 
+## 📋 Eingangsrechnungen aus dem Mailpostfach (Issue #451)
+
+Vorschlag aus der Community (Gerti): PDF-/XML-Anhänge aus einem eigenen Rechnungspostfach
+automatisch als **Entwurf** einer Eingangsrechnung samt Beleg übernehmen – nie direkt buchen,
+jeder Entwurf wird vom Nutzer geprüft. Gerade seit der E-Rechnungs-Empfangspflicht (2025)
+kommen Rechnungen überwiegend per Mail. Zwei Zugangswege mit gemeinsamem Kern
+(Anhang → bestehende PDF/XML-Analyse → Entwurf + Beleg, SHA-256-Dublettenschutz):
+
+- [ ] **Stufe 1 – IMAP direkt** (zuerst): Postfach in den Einstellungen (Host/Port/SSL/Benutzer/
+  Passwort/Ordner), Abruf beim Start und per Knopf „Postfach abrufen“; verarbeitete Mails
+  wandern in einen Unterordner „RechnungsFee/verarbeitet“ (sichtbar im Mailprogramm, übersteht
+  Neuinstallationen – kein UID-Tracking nötig). Unabhängig vom Mailprogramm (Gerti: Aerion).
+  Stdlib `imaplib`, Zertifikats-Pinning wie beim SMTP-Versand (Issue #336) wiederverwenden.
+  Nur PDF/XML mit Größenlimit, nur Entwürfe (Postfach ist von außen beschreibbar).
+  Einschränkung: Microsoft-Konten (Outlook/M365) verlangen OAuth2 – zunächst nicht unterstützt.
+- [ ] **Stufe 2 – Thunderbird-Add-on** (MailExtension): „An RechnungsFee senden“ bzw.
+  automatisch für einen Ordner, übergibt Anhänge an das lokale Backend und verschiebt die Mail.
+  Thunderbird übernimmt die Anmeldung (auch OAuth bei Microsoft/Google) – deckt damit die
+  Lücke aus Stufe 1 ab, RechnungsFee speichert keine Mail-Zugangsdaten. Eigenes Projekt,
+  Veröffentlichung über addons.thunderbird.net.
+- Bewusst **nicht**: Outlook-Steuerung per COM (nur klassisches Outlook unter Windows, läuft aus),
+  direkter Zugriff auf Thunderbird-Profildateien (beschädigt den Index bei laufendem Thunderbird).
+
+---
+
 ## 📦 Weitere Linux-Paketformate (Debian, Snap) – vor v1.0.0 testen
 
 **Anlass:** Über AppImage/NSIS/DMG hinaus wurden Debian und Snap als mögliche weitere
