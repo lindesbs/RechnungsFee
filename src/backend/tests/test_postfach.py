@@ -41,10 +41,12 @@ class FakeImap:
     instanz = None
 
     def __init__(self, mails: dict[str, bytes], move: bool = True, uidplus: bool = True,
-                 namespace: bytes | None = None):
+                 namespace: bytes | None = None, caps_erst_nach_login: bool = False):
         self.ordner = {"INBOX": dict(mails)}
-        self.capabilities = ("IMAP4REV1",) + (("MOVE",) if move else ()) + (("UIDPLUS",) if uidplus else ()) \
+        self._caps_voll = ("IMAP4REV1",) + (("MOVE",) if move else ()) + (("UIDPLUS",) if uidplus else ()) \
             + (("NAMESPACE",) if namespace else ())
+        # Dovecot-Verhalten: vor dem Login nur Basis-Fähigkeiten
+        self.capabilities = ("IMAP4REV1",) if caps_erst_nach_login else self._caps_voll
         self._namespace = namespace
         self.aktuell = None
         self.geloescht_markiert: set[str] = set()
@@ -72,7 +74,12 @@ class FakeImap:
             return "OK", [b'(\\Noselect) "/" ""']
         return "OK", [f'(\\HasNoChildren) "." "{n}"'.encode() for n in self.ordner] + [b'(\\Noselect) "." "Shared"']
 
+    def capability(self):
+        return "OK", [" ".join(self._caps_voll).encode()]
+
     def namespace(self):
+        if self._namespace is None:
+            return "BAD", [b"Unknown command"]
         return "OK", [self._namespace]
 
     def create(self, name):
@@ -179,6 +186,16 @@ def test_zielordner_unter_inbox_namensraum(db, monkeypatch):
     assert erg.mails_verschoben == 1
     assert "1" in fake.ordner["INBOX.RechnungsFee.verarbeitet"]
     assert "RechnungsFee/verarbeitet" not in fake.ordner
+
+
+def test_faehigkeiten_erst_nach_login_wie_dovecot(db, monkeypatch):
+    # Der reale Fall aus dem Test: NAMESPACE/MOVE werden erst nach der Anmeldung gemeldet
+    fake = _server(monkeypatch, {"1": _mail("Rechnung", [("re.pdf", "application/pdf", PDF)])},
+                   namespace=b'(("INBOX." ".")) NIL NIL', caps_erst_nach_login=True)
+    erg = postfach.postfach_abrufen(db)
+    assert erg.mails_verschoben == 1 and not erg.uebersprungen
+    assert "1" in fake.ordner["INBOX.RechnungsFee.verarbeitet"]
+    assert "1" not in fake.ordner["INBOX"]   # per MOVE verschoben, nicht nur kopiert
 
 
 def test_namensraum_ohne_praefix(db, monkeypatch):

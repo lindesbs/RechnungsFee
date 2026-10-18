@@ -127,6 +127,15 @@ def _verbinde(u: Unternehmen, db: Session) -> imaplib.IMAP4:
         if u.imap_zertifikat_ignorieren:
             _pruefe_gepinntes_zertifikat(u, m.sock, db)
         m.login(u.imap_user, u.imap_passwort)
+        # imaplib merkt sich die CAPABILITY-Antwort VOR der Anmeldung - viele Server (z. B. Dovecot)
+        # melden MOVE/NAMESPACE/UIDPLUS erst danach. Ohne Neuabfrage würde der Zielordner im
+        # falschen Namensraum angelegt ("Mailbox name should probably be prefixed with: INBOX.").
+        try:
+            typ, daten = m.capability()
+            if typ == "OK" and daten:
+                m.capabilities = tuple(_text(daten[-1]).upper().split())
+        except Exception:
+            pass
         return m
     except HTTPException:
         raise
@@ -218,8 +227,8 @@ def _namensraum(m: imaplib.IMAP4) -> tuple[str, Optional[str]]:
     """(Präfix, Trennzeichen) des persönlichen Namensraums (RFC 2342). Manche Server (Courier,
     einige Dovecot-Setups) erlauben eigene Ordner nur unterhalb von "INBOX." - ein Zielordner
     auf oberster Ebene ließe sich dort nicht anlegen."""
-    if not _hat_faehigkeit(m, "NAMESPACE"):
-        return "", None
+    # Bewusst auch ohne gemeldete NAMESPACE-Fähigkeit versuchen - ein Server ohne Unterstützung
+    # antwortet mit BAD/NO, dann bleibt es beim Zielordner auf oberster Ebene.
     try:
         typ, daten = m.namespace()
     except Exception:
