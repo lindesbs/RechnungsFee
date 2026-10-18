@@ -1344,6 +1344,7 @@ export type Rechnung = {
   zahlungsdatum: string | null
   notizen: string | null
   externe_belegnr: string | null
+  import_quelle?: string | null
   kunden_bestellnummer?: string | null
   positionen: Rechnungsposition[]
   zahlungen: ZahlungKompakt[]
@@ -3059,6 +3060,56 @@ export const saveMappingVorlage = (data: Omit<ImportMappingVorlage, 'id' | 'erst
 
 export const deleteMappingVorlage = (id: number) =>
   request<void>(`/datenmigration/mapping-vorlagen/${id}`, { method: 'DELETE' })
+
+export type RechnungenImportVorschauZeile = {
+  zeile: number
+  rechnungsnummer: string | null
+  partner: string | null
+  datum: string | null
+  brutto: string | null
+  bezahlt_betrag: string | null
+  bezahlt_am: string | null
+  kategorie: string | null
+  kategorie_quelle: string | null
+  kategorie_match: boolean
+  fehler: string[]
+  warnungen: string[]
+}
+export type RechnungenImportZeileErgebnis = {
+  zeile: number
+  rechnungsnummer: string | null
+  partner: string | null
+  status: 'importiert' | 'uebersprungen' | 'fehler'
+  begruendung: string | null
+  rechnung_id: number | null
+  zahlung_id: number | null
+  warnungen: string[]
+}
+export type RechnungenImportErgebnis = {
+  importiert: number
+  uebersprungen: number
+  fehler: number
+  zeilen: RechnungenImportZeileErgebnis[]
+}
+
+export async function getRechnungenImportMuster(typ: 'rechnungen' | 'belege'): Promise<Blob> {
+  const base = await getBaseUrl()
+  const res = await fetch(`${base}/rechnungen-import/muster-csv/${typ}`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.blob()
+}
+
+async function rechnungenImportRequest<T>(path: string, datei: File, typ: 'rechnungen' | 'belege', mapping: Record<string, string> = {}): Promise<T> {
+  const form = new FormData()
+  form.append('datei', datei)
+  form.append('typ', typ)
+  form.append('kategorie_mapping', JSON.stringify(mapping))
+  return request<T>(`/rechnungen-import/${path}`, { method: 'POST', body: form })
+}
+export const getRechnungenImportVorschau = (datei: File, typ: 'rechnungen' | 'belege', mapping: Record<string, string>) =>
+  rechnungenImportRequest<RechnungenImportVorschauZeile[]>('vorschau', datei, typ, mapping)
+export const importRechnungenCsv = (datei: File, typ: 'rechnungen' | 'belege', mapping: Record<string, string>) =>
+  rechnungenImportRequest<RechnungenImportErgebnis>('importieren', datei, typ, mapping)
 
 // --- Mahnwesen (docs/plan-mahnwesen.md) ---
 export type Mahnstufe = {

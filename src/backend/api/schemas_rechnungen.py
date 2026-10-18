@@ -344,6 +344,7 @@ class RechnungResponse(BaseModel):
     einleitungstext: Optional[str] = None
     schlusstext: Optional[str] = None
     externe_belegnr: Optional[str]
+    import_quelle: Optional[str] = None
     kunden_bestellnummer: Optional[str] = None
     leistung_von: Optional[date]
     leistung_bis: Optional[date]

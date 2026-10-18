@@ -204,6 +204,7 @@ export function AppLayout() {
   const { einstellungen } = useAnsicht()
   const qc = useQueryClient()
   const [bannerDismissed, setBannerDismissed] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   // Ctrl+Shift+D (Strg+Shift+D) → Dashboard
   useEffect(() => {
@@ -407,7 +408,8 @@ export function AppLayout() {
       }}
     >
       {/* Sidebar */}
-      <aside className="w-56 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-700 flex flex-col shrink-0">
+      {mobileNavOpen && <button aria-label="Navigation schließen" className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setMobileNavOpen(false)} />}
+      <aside id="app-navigation" className={`${mobileNavOpen ? 'flex' : 'hidden'} fixed inset-y-0 left-0 z-50 w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-700 flex-col shrink-0 md:static md:flex md:w-56`}>
         <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
           <img src="/logo.svg" alt="RechnungsFee" className="w-8 h-8 flex-shrink-0" />
           <div className="min-w-0">
@@ -425,6 +427,7 @@ export function AppLayout() {
           </div>
         </div>
 
+        <button className="md:hidden absolute top-3 right-3 rounded p-2 text-slate-600" aria-label="Navigation schließen" onClick={() => setMobileNavOpen(false)}>✕</button>
         <nav className="flex-1 py-2 overflow-y-auto overflow-x-hidden">
 
           {/* Dashboard */}
@@ -537,7 +540,11 @@ export function AppLayout() {
       </aside>
 
       {/* Hauptinhalt */}
-      <main className="flex-1 overflow-auto flex flex-col">
+      <main className="flex-1 min-w-0 overflow-auto flex flex-col">
+        <div className="md:hidden flex items-center gap-3 border-b border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+          <button type="button" aria-label="Navigation öffnen" aria-controls="app-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)} className="rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-600">☰ Menü</button>
+          <span className="text-sm font-semibold">RechnungsFee</span>
+        </div>
         {/* Update-Banner */}
         {updateAvailable && !updateDismissed && (
           <div className={`border-b px-4 py-2.5 flex items-center gap-3 shrink-0 ${

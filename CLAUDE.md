@@ -82,7 +82,7 @@ Seit v0.6.0 zeigt `APP_DATA_DIR` nicht mehr direkt auf den Basisordner, sondern 
 
 ## DB-Schema-Versionierung (`src/backend/main.py`)
 
-`SCHEMA_VERSION = 171` – zentrale Konstante (wird in `main.py` gepflegt).
+`SCHEMA_VERSION = 173` – zentrale Konstante (wird in `main.py` gepflegt).
 
 ### Ablauf beim App-Start
 ```
@@ -316,6 +316,8 @@ Jede Änderung an Kategorien muss an **drei Stellen** gleichzeitig erfolgen:
 | 169 | Issue #442: unternehmen.backup_extern_anzahl INTEGER NOT NULL DEFAULT 5 (1–999) – Rotation externer Backups je Zielordner nach erfolgreichem Schreiben (lokal + SMB), nur Dateien `rechnungsfee_JJJJMMTT_HHMMSS.zip.enc` (`_EXTERN_BACKUP_RE` in main.py); vorher wuchsen externe Ziele unbegrenzt; lokale Snapshots bleiben fest bei 5 |
 | 170 | Issue #451 Stufe 1: Rechnungspostfach per IMAP – unternehmen.postfach_aktiv, imap_host/port(993)/ssl(1)/user/passwort/ordner('INBOX')/beim_start, imap_zertifikat_ignorieren + imap_zertifikat_fingerprint (TOFU wie SMTP #336); neue Tabelle postfach_eingang (per create_all, sha256 UNIQUE = Dublettenschutz, status offen\|uebernommen\|verworfen, Datei unter uploads/postfach/). `api/postfach.py`: Abruf legt PDF/XML-Anhänge in die Importliste, verändert das Postfach aber nicht (SELECT readonly, BODY.PEEK). Übernahme bewusst manuell: Frontend lädt die Datei und startet den unveränderten Einzelimport (`ImportDialog startDatei`), danach POST /uebernommen |
 | 171 | Issue #451: postfach_eingang.mail_ordner/mail_uidvalidity/mail_uid/mail_message_id + unternehmen.imap_abruf_stand (JSON ordner/uidvalidity/uid). Mail wird erst bei Übernahme nach „RechnungsFee/verarbeitet“ verschoben (sobald kein Anhang derselben Mail mehr offen ist; nur verworfene bleiben im Posteingang) – UID, bei geänderter UIDVALIDITY Suche per Message-ID. Zielordner unter dem NAMESPACE-Präfix (z. B. `INBOX.RechnungsFee.verarbeitet`); Server-Fähigkeiten nach dem Login neu abfragen (Dovecot meldet MOVE/NAMESPACE erst dann). Abruf prüft nur UIDs nach dem Abrufstand und lädt nur Mails, deren BODYSTRUCTURE einen möglichen PDF/XML-Anhang zeigt |
+| 172 | Issue #445 (PR #446, Caro/honiglinchen): rechnungen.import_quelle VARCHAR(30) – per CSV-Import (`api/rechnungen_import.py`, Datenübernahme-Tab „Rechnungen & Belege“) übernommene Alt-Rechnungen/-Belege (z. B. „papierkram“); gesetzt ⇒ PDF-/ZUGFeRD-Ausgabe, Mailversand und Mahnung gesperrt (Original liegt im Altsystem, Original-PDF als Beleg anhängbar), offene Posten/Kontokorrent bleiben. Import nur 0/7/19 % (gemischte Sätze abgewiesen), nur Herkunftsort „domestic“, Teilzahlungen abgewiesen. Im PR ursprünglich als 168 nummeriert, beim Merge auf 172 verschoben |
+| 173 | Issue #445-Folgefund (PR #446): `CREATE TABLE IF NOT EXISTS import_mapping_vorlagen` – fehlte auf frisch angelegten DBs (Migration 116 griff dort nicht), gespeicherte Feldzuordnungen der Datenübernahme scheiterten bei Neuinstallationen. Im PR ursprünglich 169 |
 
 ### `_backup_datenbank()`
 - `sqlite3.connect().backup()` – WAL-sicher, konsistentes Snapshot

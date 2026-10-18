@@ -1478,10 +1478,17 @@ function RechnungDetail({
       </div>
 
       <div className="p-5 space-y-5 flex-1">
+        {rechnung.import_quelle === 'papierkram' && (
+          <div role="note" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+            Importiert – Original im Altsystem. Diese Rechnung bleibt als offener Posten sichtbar, kann aber nicht neu als PDF erzeugt, versendet oder gemahnt werden. Ein vorhandener Originalbeleg kann weiterhin angehängt werden.
+          </div>
+        )}
 
         {/* Aktionsleiste */}
         <div className="flex flex-wrap gap-2">
-          {rechnung.ist_entwurf || (rechnung.dokument_typ === 'Gutschrift' && rechnung.zahlungsstatus !== 'bezahlt') ? (
+          {rechnung.import_quelle === 'papierkram' ? (
+            <span className="self-center text-xs text-amber-700 dark:text-amber-300">PDF- und Mailversand gesperrt – Original im Altsystem</span>
+          ) : rechnung.ist_entwurf || (rechnung.dokument_typ === 'Gutschrift' && rechnung.zahlungsstatus !== 'bezahlt') ? (
             <button
               onClick={handlePdfOeffnen}
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400"

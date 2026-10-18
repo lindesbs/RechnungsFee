@@ -1378,6 +1378,10 @@ def rechnung_vorschau(data: RechnungVorschauRequest, db: Session = Depends(get_d
 
 @router.post("", response_model=RechnungResponse, status_code=201)
 def create_rechnung(data: RechnungCreate, db: Session = Depends(get_db)):
+    return _create_rechnung(data, db)
+
+
+def _create_rechnung(data: RechnungCreate, db: Session, import_quelle: str | None = None):
     """Rechnung mit Positionen anlegen. Summen werden automatisch berechnet."""
     # Kundensperrung (Abschnitt E): deckt Rechnung/Angebot/Lieferschein/Proforma ab (alle
     # laufen über diesen Endpunkt, unterschieden per dokument_typ) - Gutschrift und Storno
@@ -1482,6 +1486,7 @@ def create_rechnung(data: RechnungCreate, db: Session = Depends(get_db)):
         einleitungstext=data.einleitungstext,
         schlusstext=data.schlusstext,
         externe_belegnr=data.externe_belegnr,
+        import_quelle=import_quelle,
         kunden_bestellnummer=data.kunden_bestellnummer,
         ist_entwurf=data.ist_entwurf,
         skonto_prozent=None if data.dokument_typ == "Proforma" else data.skonto_prozent,
@@ -1890,6 +1895,8 @@ def markiere_ausgegeben(rechnung_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Rechnung nicht gefunden.")
     if rechnung.ist_entwurf:
         raise HTTPException(status_code=409, detail="Entwürfe werden nicht als ausgegeben markiert.")
+    if rechnung.import_quelle == "papierkram":
+        raise HTTPException(status_code=409, detail="Importierte Rechnung kann nicht als neu ausgegeben markiert werden. Das Original findest du im Altsystem.")
     rechnung.ausgegeben = True
     if not rechnung.ausgegeben_am:
         rechnung.ausgegeben_am = datetime.now()
@@ -1908,6 +1915,15 @@ def rechnung_als_pdf(rechnung_id: int, vorlage: int = -1, download: bool = False
     rechnung = db.query(Rechnung).filter(Rechnung.id == rechnung_id).first()
     if not rechnung:
         raise HTTPException(status_code=404, detail="Rechnung nicht gefunden.")
+    if rechnung.import_quelle == "papierkram":
+        if nur_ansehen and rechnung.original_pdf_pfad:
+            original = APP_DATA_DIR / rechnung.original_pdf_pfad
+            if original.is_file():
+                return Response(
+                    content=original.read_bytes(), media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{rechnung.rechnungsnummer or rechnung_id}_Original.pdf"', "Cache-Control": "no-store"},
+                )
+        raise HTTPException(status_code=409, detail="Importierte Rechnung: PDF-Erzeugung ist gesperrt. Das Original findest du im Altsystem; ein vorhandenes Original-PDF kann als Beleg angehängt werden.")
 
     # Absenderdaten: Snapshot hat Vorrang vor aktuellen Stammdaten (GoBD – finalisierte Dokumente sind unveränderlich)
     unternehmen = db.query(Unternehmen).first()
@@ -2385,6 +2401,8 @@ def rechnung_als_zugferd(rechnung_id: int, db: Session = Depends(get_db)):
     rechnung = db.query(Rechnung).filter(Rechnung.id == rechnung_id).first()
     if not rechnung:
         raise HTTPException(status_code=404, detail="Rechnung nicht gefunden.")
+    if rechnung.import_quelle == "papierkram":
+        raise HTTPException(status_code=409, detail="Importierte Rechnung kann nicht als ZUGFeRD neu ausgegeben werden. Das Original findest du im Altsystem.")
     if rechnung.typ != "ausgang":
         raise HTTPException(status_code=400, detail="ZUGFeRD ist nur für Ausgangsrechnungen verfügbar.")
     if getattr(rechnung, "dokument_typ", "Rechnung") != "Rechnung":

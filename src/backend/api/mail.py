@@ -70,6 +70,8 @@ def _pdf_bytes_fuer(rechnung_id: int, db: Session) -> tuple[bytes, str, Optional
     r = db.query(Rechnung).filter(Rechnung.id == rechnung_id).first()
     if not r:
         raise HTTPException(404, "Dokument nicht gefunden")
+    if r.import_quelle == "papierkram":
+        raise HTTPException(409, "Importierte Rechnung: Versand ist gesperrt. Das Original findest du im Altsystem.")
 
     u = db.query(Unternehmen).first()
     unt_dict = {c.name: getattr(u, c.name) for c in u.__table__.columns} if u else {}

@@ -266,6 +266,19 @@ class Kategorie(Base):
     transaktionen: Mapped[list["BankTransaktion"]] = relationship(back_populates="kategorie")
 
 
+class ImportMappingVorlage(Base):
+    """Gespeicherte Spaltenzuordnungen für CSV-Stammdatenimporte."""
+    __tablename__ = "import_mapping_vorlagen"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    typ: Mapped[str] = mapped_column(String(20), nullable=False)
+    hat_header: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    mapping_json: Mapped[str] = mapped_column(Text, nullable=False)
+    typ_erkennung_aktiv: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    erstellt_am: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class Schnellbuchung(Base):
     """Wiederverwendbare Vorlage für häufige manuelle Journalbuchungen (Issue #256).
 
@@ -751,6 +764,7 @@ class Rechnung(Base):
     beleg_id: Mapped[int | None] = mapped_column(ForeignKey("belege.id"))
     notizen: Mapped[str | None] = mapped_column(Text)
     externe_belegnr: Mapped[str | None] = mapped_column(String(100))  # Lieferanten-Rechnungsnr. (nur Eingang)
+    import_quelle: Mapped[str | None] = mapped_column(String(30))  # z. B. papierkram; historisch, nicht neu ausgeben/mahnen
     kunden_bestellnummer: Mapped[str | None] = mapped_column(String(100))  # Bestellnummer des Kunden (nur Ausgang) -> ZUGFeRD BT-13
     leistung_von: Mapped[date | None] = mapped_column(Date)
     leistung_bis: Mapped[date | None] = mapped_column(Date)
