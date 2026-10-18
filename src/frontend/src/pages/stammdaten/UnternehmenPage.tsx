@@ -1909,6 +1909,14 @@ function EmailSektion({ data }: { data: Unternehmen }) {
   return (
     <div className="space-y-8">
       <div className="space-y-1">
+        <h3 className="text-sm font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Rechnungspostfach (IMAP)</h3>
+        <p className="text-xs text-slate-400 dark:text-slate-500">Eingangsrechnungen direkt aus einem Mailpostfach übernehmen.</p>
+      </div>
+      <PostfachSektion data={data} />
+
+      <hr className="border-slate-100 dark:border-slate-700" />
+
+      <div className="space-y-1">
         <h3 className="text-sm font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">SMTP-Versand</h3>
         <p className="text-xs text-slate-400 dark:text-slate-500">Direkt aus RechnungsFee versenden – mit PDF-Anhang und Dokumentenpaketen.</p>
       </div>
@@ -1923,14 +1931,6 @@ function EmailSektion({ data }: { data: Unternehmen }) {
           <ThunderbirdSektion data={data} />
         </>
       )}
-
-      <hr className="border-slate-100 dark:border-slate-700" />
-
-      <div className="space-y-1">
-        <h3 className="text-sm font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Rechnungspostfach (IMAP)</h3>
-        <p className="text-xs text-slate-400 dark:text-slate-500">Eingangsrechnungen direkt aus einem Mailpostfach übernehmen.</p>
-      </div>
-      <PostfachSektion data={data} />
 
       <hr className="border-slate-100 dark:border-slate-700" />
 
