@@ -109,69 +109,57 @@ Paketformate geprüft – beide haben grundlegend unterschiedliche Hürden.
 
 ---
 
-## ♿ Barrierefreiheit (kein fester Zeitplan, aber Pflicht vor 1.0)
+## ♿ v0.8.0 – Barrierefreiheit & Tastatur (Pflicht vor 1.0)
 
-Die App ist aktuell **nicht barrierefrei**. Dark/Light Mode und Keyboard-Navigation (Combobox) sind vorhanden, aber Screenreader-Unterstützung fehlt weitgehend.
+Die App ist bisher **nicht barrierefrei**: Screenreader-Unterstützung fehlt weitgehend, vieles ist
+nur per Maus erreichbar. v0.8.0 wird deshalb ein eigenes Release für Barrierefreiheit und
+Tastatursteuerung. Bugfixes laufen parallel als 0.7.x weiter; größere neue Funktionen werden bis
+0.8.0 zurückgestellt, damit nicht laufend neue Oberfläche ohne diese Standards entsteht.
+Planung und Aufgabenverteilung: [Meilenstein „v0.8.0“](https://github.com/nicolettas-muggelbude/RechnungsFee/milestone/8) + Sammel-Issue #455.
 
-### Priorität 1 – Focus-Management in Modalen
-- [ ] `role="dialog"` + `aria-modal="true"` + `aria-labelledby` auf alle Modal-Overlays
-- [ ] Focus-Trap: Tab bleibt innerhalb des offenen Modals
-- [ ] Initial Focus beim Öffnen (erster Input oder Schließen-Button)
+**Ziel:** WCAG 2.1 AA für die Kernabläufe; restliche Bereiche schrittweise in 0.8.x.
 
-### Priorität 2 – Formulare
-- [ ] `htmlFor` + `id` in allen Formular-Labels verknüpfen (viele fehlen aktuell)
-- [ ] `aria-required="true"` für Pflichtfelder (visuelles `*` reicht nicht für Screenreader)
-- [ ] `aria-describedby` für Fehlermeldungen an den jeweiligen Input koppeln
+### 1. Fundament
+- [ ] Alle Dialoge auf die gemeinsame Modal-Basis (`components/Modal.tsx`, PR #452: `role="dialog"`,
+  `aria-modal`, `aria-labelledby`, Startfokus, Focus-Trap, Esc, Fokus zurück) – ca. 21 Dialoge
+- [ ] Esc in offenen Auswahllisten (Land, Stammdaten, Datum) schließt nur die Liste, nicht den Dialog
+- [ ] `aria-live="polite"` für Statusmeldungen (Gespeichert, Fehler, Import-Ergebnisse)
+- [ ] Landmarken in `AppLayout.tsx`: `<main>`, `<nav>`, `<header>`
+- [ ] Dekorative Icons/Emojis mit `aria-hidden="true"`, Icon-Buttons mit `aria-label`
 
-### Priorität 3 – Semantisches Layout
-- [ ] `<main>`, `<nav>`, `<header>` in `AppLayout.tsx` ergänzen
-- [ ] Dekorative SVG-Icons mit `aria-hidden="true"` versehen
-- [ ] Tabellen (`<table>`) mit `<thead>` / `<tbody>` / `scope`-Attributen
+### 2. Formulare
+- [ ] `htmlFor` + `id` in allen Formular-Labels
+- [ ] Pflichtfelder mit `aria-required`, Fehlermeldungen per `aria-describedby` am Feld
+- [ ] Comboboxen (Land, Stammdaten, Artikel, Kategorie) mit `role="combobox"`, `aria-expanded`,
+  `aria-activedescendant`; Pfeiltasten + Enter, kein Mausklick nötig
+- [ ] Datumsfelder per Tastatur bedienbar
+- [ ] Tabellen mit `<thead>`/`<tbody>`/`scope`
 
-### Priorität 4 – ARIA-Architektur
-- [ ] `aria-label` / `aria-labelledby` für Icon-only-Buttons (Löschen, Bearbeiten etc.)
-- [ ] `aria-expanded` für Akkordeons und aufklappbare Bereiche
-- [ ] `aria-live="polite"` für dynamische Statusmeldungen (Speichern, Fehler)
+### 3. Kernabläufe komplett per Tastatur
+- [ ] Navigation: Seitenleiste per Tab, aktiver Punkt per Enter
+- [ ] Listen (Rechnungen, Kunden …) per Pfeiltasten, Enter öffnet das Detail-Panel
+- [ ] Rechnung schreiben und finalisieren (inkl. Positionszeilen: Tab durch alle Spalten)
+- [ ] Zahlung buchen, Journal-Buchung, Eingangsrechnung importieren (inkl. Dropzone und Postfach)
+- [ ] Bestätigungsdialoge (Ja/Nein) per Enter/Leertaste, Esc schließt
 
-### Ziel: WCAG 2.1 AA
+### 4. Prüfwerkzeuge & Abnahme
+- [ ] `eslint-plugin-jsx-a11y` im Lint
+- [ ] axe-Prüfung in den Vitest-Tests der umgestellten Komponenten
+- [ ] Kontrast-Check für Hell- und Dunkelmodus
+- [ ] Manueller Durchlauf der Kernabläufe mit NVDA (Windows) und Orca (Linux), VoiceOver (macOS)
+  wenn möglich – Linux (WebKitGTK) unterstützt Screenreader schwächer, dort nur Bestätigtes zusagen
 
----
-
-## ⌨️ Ziel: Vollständige Tastatursteuerung (kein fester Zeitplan)
-
-**Ziel:** RechnungsFee soll komplett ohne Maus bedienbar sein – von der Navigation bis zum Finalisieren einer Rechnung.
-
-### Globale Kürzel
+### Bereits vorhandene Tastaturkürzel
 
 | Kürzel | Aktion | Status |
 |--------|--------|--------|
 | Strg + F | Suchfeld auf der aktuellen Seite fokussieren | ✅ v0.3.33 |
 | Strg + Shift + E | Direkt zu Eingangsrechnungen | ✅ v0.3.26 |
-| Strg + N | Neue Rechnung / Neues Dokument anlegen (kontextabhängig) | [ ] |
-| Strg + S | Speichern (im aktiven Formular) | [ ] |
-| Strg + Enter | Finalisieren (Entwurf → Rechnung) | [ ] |
-| Esc | Dialog / Detail-Panel schließen | [ ] |
+| + / E / A | Journal: neue Buchung, Einnahme/Ausgabe wechseln | ✅ |
 
-### Navigation & Listen
-
-- [ ] Sidebar vollständig per Tab erreichbar; aktiver Menüpunkt per Enter öffnen
-- [ ] Listeneinträge (Rechnungen, Kunden usw.) per Pfeiltasten durchblättern; Enter öffnet Detail-Panel
-- [ ] Detail-Panel: Tab-Navigation durch alle Aktions-Buttons (Bearbeiten, Drucken, Stornieren …)
-- [ ] Tabellen-Header per Tab fokussierbar, Enter sortiert die Spalte
-
-### Formulare
-
-- [ ] Tab / Shift+Tab springt durch alle Felder in logischer Reihenfolge
-- [ ] Positionszeilen: Tab springt durch alle Spalten, Enter fügt neue Zeile hinzu
-- [ ] Datums-Felder: Pfeiltasten erhöhen/verringern Tag/Monat/Jahr
-- [ ] Dropdowns (USt-Satz, Kategorie, Zahlungsart): Pfeiltasten + Enter, kein Mausklick nötig
-- [ ] Autocomplete (Artikel, Kunde): Pfeiltasten wählen Vorschlag, Enter übernimmt
-
-### Modals & Dialoge
-
-- [ ] Focus-Trap: Tab bleibt innerhalb des offenen Dialogs
-- [ ] Esc schließt alle Dialoge (Mail, Storno, Finalisieren, …)
-- [ ] Bestätigungs-Buttons (Ja/Nein) per Enter / Leertaste auslösbar
+### Später (0.8.x, kein Muss für 0.8.0)
+- Selten genutzte Bereiche (Anlage EKS, Inventur, DATEV-Details …) schrittweise nachziehen
+- Komfort-Kürzel: Strg + N (neues Dokument), Strg + S (speichern), Strg + Enter (finalisieren)
 
 ---
 
