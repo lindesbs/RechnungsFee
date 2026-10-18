@@ -2535,8 +2535,45 @@ def delete_rechnung(rechnung_id: int, db: Session = Depends(get_db)):
             Forderung.ausgleich_journal_id.is_(None),
         ).update({"status": "offen"})
 
+    # Kein Datenmüll: angehängte Belege (Beleganhang + ZUGFeRD-Zusatzanhänge) und ein bereits
+    # gespeichertes Original-PDF gehören nur zu diesem Dokument und werden mit entfernt - sofern
+    # kein anderer Datensatz denselben Beleg verwendet.
+    beleg_ids = {rechnung.beleg_id} | {a.beleg_id for a in rechnung.zugferd_anhaenge}
+    beleg_ids.discard(None)
+    original_pdf = rechnung.original_pdf_pfad
+
     db.delete(rechnung)
+    db.flush()   # Rechnung + ZUGFeRD-Verknüpfungen weg, damit die Belege als unbenutzt erkannt werden
+    zu_loeschende_dateien = [APP_DATA_DIR / original_pdf] if original_pdf else []
+    for beleg_id in beleg_ids:
+        zu_loeschende_dateien += _beleg_loeschen_wenn_unbenutzt(beleg_id, db)
     db.commit()
+
+    # Dateien erst nach erfolgreichem Commit entfernen - schlägt der Commit fehl, bleibt alles erhalten
+    for pfad in zu_loeschende_dateien:
+        try:
+            if pfad.is_file():
+                pfad.unlink()
+        except OSError:
+            logging.getLogger(__name__).warning("Datei beim Löschen des Entwurfs nicht entfernt: %s", pfad)
+
+
+def _beleg_loeschen_wenn_unbenutzt(beleg_id: int, db: Session) -> list[Path]:
+    """Löscht den Beleg-Datensatz, wenn ihn nichts mehr verwendet, und liefert seine Dateien
+    (Original + PDF/A) zum anschließenden Entfernen. Wird er noch verwendet: leere Liste."""
+    from database.models import (
+        Buchungsvorlage, DokumentenPaketBeleg, KundeBeleg, Rechnungsvorlage, RechnungZugferdAnhang,
+    )
+    for modell in (Rechnung, Journaleintrag, RechnungZugferdAnhang, KundeBeleg, DokumentenPaketBeleg,
+                   Rechnungsvorlage, Buchungsvorlage):
+        if db.query(modell).filter(modell.beleg_id == beleg_id).first():
+            return []
+    beleg = db.query(Beleg).filter(Beleg.id == beleg_id).first()
+    if not beleg:
+        return []
+    dateien = [APP_DATA_DIR / "uploads" / rel for rel in {beleg.dateiname, beleg.beleg_pdfa_pfad} if rel]
+    db.delete(beleg)
+    return dateien
 
 
 # ---------------------------------------------------------------------------
