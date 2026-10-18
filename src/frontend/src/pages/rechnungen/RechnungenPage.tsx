@@ -4609,7 +4609,8 @@ function PostfachDialog({
             beim Einzelimport, die Datei wird als Beleg angehängt. Danach wandert die Mail im Postfach in den Ordner
             „RechnungsFee/verarbeitet“ und dieses Fenster öffnet sich für die nächste Rechnung wieder.
             „Verwerfen" ist für Anhänge, die keine Rechnung sind (z. B. AGB) – die Mail bleibt im Posteingang, wird aber
-            nicht erneut angeboten.
+            nicht erneut angeboten. Ist der Ordner „RechnungsFee/verarbeitet“ in deinem Mailprogramm nicht zu sehen,
+            hilft meist ein Neustart des Mailprogramms.
           </p>
         </div>
       </div>
