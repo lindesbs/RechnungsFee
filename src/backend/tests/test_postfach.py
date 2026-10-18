@@ -40,9 +40,12 @@ class FakeImap:
     """Minimaler IMAP-Server: ein Quellordner, UIDs ab 1, MOVE optional."""
     instanz = None
 
-    def __init__(self, mails: dict[str, bytes], move: bool = True, uidplus: bool = True):
+    def __init__(self, mails: dict[str, bytes], move: bool = True, uidplus: bool = True,
+                 namespace: bytes | None = None):
         self.ordner = {"INBOX": dict(mails)}
-        self.capabilities = ("IMAP4REV1",) + (("MOVE",) if move else ()) + (("UIDPLUS",) if uidplus else ())
+        self.capabilities = ("IMAP4REV1",) + (("MOVE",) if move else ()) + (("UIDPLUS",) if uidplus else ()) \
+            + (("NAMESPACE",) if namespace else ())
+        self._namespace = namespace
         self.aktuell = None
         self.geloescht_markiert: set[str] = set()
         self.eingeloggt = False
@@ -65,7 +68,12 @@ class FakeImap:
         return "OK", [str(len(self.ordner[name])).encode()]
 
     def list(self, *a):
-        return "OK", [b'(\\Noselect) "/" ""']
+        if a == ('""', '""'):   # nur Trennzeichen erfragen
+            return "OK", [b'(\\Noselect) "/" ""']
+        return "OK", [f'(\\HasNoChildren) "." "{n}"'.encode() for n in self.ordner] + [b'(\\Noselect) "." "Shared"']
+
+    def namespace(self):
+        return "OK", [self._namespace]
 
     def create(self, name):
         self.ordner.setdefault(name.strip('"'), {})
@@ -163,6 +171,23 @@ def test_bereits_als_beleg_vorhanden_ist_dublette(db, monkeypatch):
     assert (erg.neu, erg.dubletten) == (0, 1)
 
 
+def test_zielordner_unter_inbox_namensraum(db, monkeypatch):
+    # Courier/Dovecot mit Präfix "INBOX." - eigene Ordner nur unterhalb von INBOX erlaubt
+    fake = _server(monkeypatch, {"1": _mail("Rechnung", [("re.pdf", "application/pdf", PDF)])},
+                   namespace=b'(("INBOX." ".")) NIL NIL')
+    erg = postfach.postfach_abrufen(db)
+    assert erg.mails_verschoben == 1
+    assert "1" in fake.ordner["INBOX.RechnungsFee.verarbeitet"]
+    assert "RechnungsFee/verarbeitet" not in fake.ordner
+
+
+def test_namensraum_ohne_praefix(db, monkeypatch):
+    fake = _server(monkeypatch, {"1": _mail("Rechnung", [("re.pdf", "application/pdf", PDF)])},
+                   namespace=b'(("" "/")) NIL NIL')
+    postfach.postfach_abrufen(db)
+    assert "1" in fake.ordner["RechnungsFee/verarbeitet"]
+
+
 def test_ohne_move_kopieren_und_nur_eigene_mail_entfernen(db, monkeypatch):
     fake = _server(monkeypatch, {"1": _mail("Rechnung", [("re.pdf", "application/pdf", PDF)])},
                    move=False, uidplus=True)
@@ -193,6 +218,18 @@ def test_falsches_passwort_gibt_verstaendliche_meldung(db, monkeypatch):
     with pytest.raises(HTTPException) as exc:
         postfach.postfach_abrufen(db)
     assert "Anmeldung am Postfach fehlgeschlagen" in exc.value.detail
+
+
+def test_falscher_ordner_nennt_vorhandene_ordner(db, monkeypatch):
+    fake = _server(monkeypatch, {})
+    fake.ordner["INBOX.TEST"] = {}
+    db.query(Unternehmen).first().imap_ordner = "INBOX/TEST"
+    db.commit()
+    with pytest.raises(HTTPException) as exc:
+        postfach.postfach_testen(db)
+    assert "„INBOX/TEST\" nicht gefunden" in exc.value.detail
+    assert "„INBOX.TEST“" in exc.value.detail and "„INBOX“" in exc.value.detail
+    assert "Shared" not in exc.value.detail   # \Noselect nicht anbieten
 
 
 def test_nicht_eingerichtet(db):

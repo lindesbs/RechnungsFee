@@ -174,9 +174,69 @@ def _trennzeichen(m: imaplib.IMAP4) -> str:
     return "/"
 
 
+_LIST_ZEILE_RE = re.compile(rb'^\((?P<flags>[^)]*)\)\s+(?:"(?:[^"\\]|\\.)*"|NIL)\s+(?P<name>.+)$')
+
+
+def _ordnerliste(m: imaplib.IMAP4) -> list[str]:
+    """Alle auswählbaren Ordnernamen in der Schreibweise des Servers (inkl. Trennzeichen)."""
+    typ, daten = m.list()
+    namen: list[str] = []
+    for zeile in (daten or []) if typ == "OK" else []:
+        if isinstance(zeile, tuple):    # Literal-Form {n}\r\nname
+            kopf, name_roh = zeile[0], zeile[1]
+            if b"\\Noselect" in kopf:
+                continue
+            namen.append(name_roh.decode("utf-8", "replace"))
+            continue
+        if not isinstance(zeile, bytes):
+            continue
+        treffer = _LIST_ZEILE_RE.match(zeile.strip())
+        if not treffer or b"\\Noselect" in treffer.group("flags"):
+            continue
+        name = treffer.group("name").decode("utf-8", "replace")
+        if name.startswith('"') and name.endswith('"'):
+            name = name[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+        namen.append(name)
+    return sorted(namen, key=str.lower)
+
+
+def _ordner_auswaehlen(m: imaplib.IMAP4, ordner: str, readonly: bool = False):
+    typ, daten = m.select(_q(ordner), readonly=readonly)
+    if typ == "OK":
+        return daten
+    vorhanden = [n for n in _ordnerliste(m) if ZIEL_TEILE[0] not in n]   # eigenen Zielordner nicht anbieten
+    hinweis = (" Vorhandene Ordner: " + ", ".join(f"„{n}“" for n in vorhanden[:30])
+               + (" …" if len(vorhanden) > 30 else "") + ".") if vorhanden else ""
+    raise HTTPException(
+        400,
+        f'Ordner „{ordner}" nicht gefunden. Unterordner werden je nach Mailserver mit „/" oder „." '
+        f'getrennt (z. B. „INBOX/Rechnungen" oder „INBOX.Rechnungen").{hinweis}',
+    )
+
+
+def _namensraum(m: imaplib.IMAP4) -> tuple[str, Optional[str]]:
+    """(Präfix, Trennzeichen) des persönlichen Namensraums (RFC 2342). Manche Server (Courier,
+    einige Dovecot-Setups) erlauben eigene Ordner nur unterhalb von "INBOX." - ein Zielordner
+    auf oberster Ebene ließe sich dort nicht anlegen."""
+    if not _hat_faehigkeit(m, "NAMESPACE"):
+        return "", None
+    try:
+        typ, daten = m.namespace()
+    except Exception:
+        return "", None
+    roh = daten[0] if typ == "OK" and daten and isinstance(daten[0], bytes) else b""
+    treffer = re.match(rb'\(\("((?:[^"\\]|\\.)*)"\s+(?:"((?:[^"\\]|\\.)*)"|NIL)\)', roh)
+    if not treffer:
+        return "", None
+    praefix = treffer.group(1).decode("utf-8", "replace")
+    trenner = treffer.group(2).decode("utf-8", "replace") if treffer.group(2) is not None else None
+    return praefix, trenner
+
+
 def _zielordner_anlegen(m: imaplib.IMAP4) -> str:
-    trenner = _trennzeichen(m)
-    pfad = ""
+    praefix, ns_trenner = _namensraum(m)
+    trenner = ns_trenner or _trennzeichen(m)
+    pfad = praefix.rstrip(trenner) if praefix else ""
     for teil in ZIEL_TEILE:
         pfad = f"{pfad}{trenner}{teil}" if pfad else teil
         m.create(_q(pfad))       # existiert er schon, antwortet der Server mit NO - unkritisch
@@ -243,9 +303,7 @@ def postfach_testen(db: Session = Depends(get_db)):
     u = _einstellungen(db)
     m = _verbinde(u, db)
     try:
-        typ, daten = m.select(_q(u.imap_ordner or "INBOX"), readonly=True)
-        if typ != "OK":
-            raise HTTPException(400, f'Ordner „{u.imap_ordner}" nicht gefunden.')
+        daten = _ordner_auswaehlen(m, u.imap_ordner or "INBOX", readonly=True)
         return TestErgebnis(ok=True, ordner=u.imap_ordner or "INBOX", anzahl_mails=int(_text(daten) or 0))
     finally:
         try:
@@ -260,9 +318,7 @@ def postfach_abrufen(db: Session = Depends(get_db)):
     m = _verbinde(u, db)
     ergebnis = AbrufErgebnis(mails_geprueft=0, mails_verschoben=0, neu=0, dubletten=0)
     try:
-        typ, _ = m.select(_q(u.imap_ordner or "INBOX"))
-        if typ != "OK":
-            raise HTTPException(400, f'Ordner „{u.imap_ordner}" nicht gefunden.')
+        _ordner_auswaehlen(m, u.imap_ordner or "INBOX")
         typ, daten = m.uid("SEARCH", None, "ALL")
         uids = (daten[0] or b"").split() if typ == "OK" and daten else []
         if len(uids) > MAX_MAILS_PRO_ABRUF:
