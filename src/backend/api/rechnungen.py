@@ -2369,13 +2369,13 @@ def delete_zugferd_anhang(rechnung_id: int, anhang_id: int, db: Session = Depend
     ).first()
     if not anhang:
         raise HTTPException(404, "Anhang nicht gefunden.")
-    beleg = anhang.beleg
-    pfad = APP_DATA_DIR / "uploads" / beleg.dateiname
-    if pfad.exists():
-        pfad.unlink()
+    beleg_id = anhang.beleg_id
     db.delete(anhang)
-    db.delete(beleg)
+    db.flush()
+    # inkl. PDF/A-Fassung, die bisher liegen blieb
+    dateien = _beleg_loeschen_wenn_unbenutzt(beleg_id, db)
     db.commit()
+    _dateien_entfernen(dateien)
 
 
 @router.get("/{rechnung_id}/zugferd")
@@ -2548,19 +2548,14 @@ def delete_rechnung(rechnung_id: int, db: Session = Depends(get_db)):
     for beleg_id in beleg_ids:
         zu_loeschende_dateien += _beleg_loeschen_wenn_unbenutzt(beleg_id, db)
     db.commit()
-
-    # Dateien erst nach erfolgreichem Commit entfernen - schlägt der Commit fehl, bleibt alles erhalten
-    for pfad in zu_loeschende_dateien:
-        try:
-            if pfad.is_file():
-                pfad.unlink()
-        except OSError:
-            logging.getLogger(__name__).warning("Datei beim Löschen des Entwurfs nicht entfernt: %s", pfad)
+    _dateien_entfernen(zu_loeschende_dateien)
 
 
-def _beleg_loeschen_wenn_unbenutzt(beleg_id: int, db: Session) -> list[Path]:
+def _beleg_loeschen_wenn_unbenutzt(beleg_id: int, db: Session, basis: Path | None = None) -> list[Path]:
     """Löscht den Beleg-Datensatz, wenn ihn nichts mehr verwendet, und liefert seine Dateien
-    (Original + PDF/A) zum anschließenden Entfernen. Wird er noch verwendet: leere Liste."""
+    (Original + PDF/A) zum anschließenden Entfernen. Wird er noch verwendet: leere Liste.
+    basis: Verzeichnis, relativ zu dem beleg.dateiname gespeichert ist - Standard uploads/,
+    Buchungsvorlagen legen ihre Belege abweichend relativ zu uploads/belege/ ab."""
     from database.models import (
         Buchungsvorlage, DokumentenPaketBeleg, KundeBeleg, Rechnungsvorlage, RechnungZugferdAnhang,
     )
@@ -2571,9 +2566,20 @@ def _beleg_loeschen_wenn_unbenutzt(beleg_id: int, db: Session) -> list[Path]:
     beleg = db.query(Beleg).filter(Beleg.id == beleg_id).first()
     if not beleg:
         return []
-    dateien = [APP_DATA_DIR / "uploads" / rel for rel in {beleg.dateiname, beleg.beleg_pdfa_pfad} if rel]
+    basis = basis or APP_DATA_DIR / "uploads"
+    dateien = [basis / rel for rel in {beleg.dateiname, beleg.beleg_pdfa_pfad} if rel]
     db.delete(beleg)
     return dateien
+
+
+def _dateien_entfernen(pfade: list[Path]) -> None:
+    """Nach erfolgreichem Commit aufrufen - schlägt der Commit fehl, bleiben die Dateien erhalten."""
+    for pfad in pfade:
+        try:
+            if pfad.is_file():
+                pfad.unlink()
+        except OSError:
+            logging.getLogger(__name__).warning("Datei nicht entfernt: %s", pfad)
 
 
 # ---------------------------------------------------------------------------

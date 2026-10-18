@@ -94,6 +94,47 @@ def test_beleg_der_noch_verwendet_wird_bleibt(db):
     assert (basis / "uploads" / b.dateiname).exists()
 
 
+def test_einzelnen_zugferd_anhang_entfernen_loescht_auch_pdfa(db):
+    session, basis = db
+    anhang = _beleg(session, basis, "vertrag.pdf", mit_pdfa=True)
+    r = _entwurf(session)
+    za = RechnungZugferdAnhang(rechnung_id=r.id, beleg_id=anhang.id)
+    session.add(za)
+    session.commit()
+
+    rechnungen_api.delete_zugferd_anhang(r.id, za.id, session)
+
+    assert session.query(Beleg).count() == 0
+    assert not list((basis / "uploads").rglob("*.pdf"))   # Original UND PDF/A weg
+
+
+def test_buchungsvorlage_loeschen_entfernt_ihren_beleg(db, monkeypatch):
+    from decimal import Decimal
+    import api.buchungsvorlagen as bv_api
+    from database.models import Buchungsvorlage
+
+    session, basis = db
+    beleg_dir = basis / "uploads" / "belege"
+    monkeypatch.setattr(bv_api, "BELEG_DIR", beleg_dir)
+    beleg_dir.mkdir(parents=True)
+    (beleg_dir / "mietvertrag.pdf").write_bytes(b"%PDF")   # Buchungsvorlagen: relativ zu BELEG_DIR
+    b = Beleg(dateiname="mietvertrag.pdf", original_name="Mietvertrag.pdf", sha256="mv")
+    session.add(b)
+    session.flush()
+    v = Buchungsvorlage(
+        bezeichnung="Büromiete", betrag=Decimal("500.00"), ist_brutto=True, ust_satz=Decimal("19"),
+        intervall="monatlich", naechstes_datum=date(2026, 1, 1), modus="direkt", art="Ausgabe", beleg_id=b.id,
+    )
+    session.add(v)
+    session.commit()
+
+    bv_api.loesche_vorlage(v.id, session)
+
+    assert session.query(Buchungsvorlage).count() == 0
+    assert session.query(Beleg).count() == 0
+    assert not (beleg_dir / "mietvertrag.pdf").exists()
+
+
 def test_entwurf_ohne_anhang_unveraendert_loeschbar(db):
     session, _ = db
     r = _entwurf(session)
