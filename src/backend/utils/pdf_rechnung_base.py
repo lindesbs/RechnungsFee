@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from fpdf import FPDF
+from utils.logo import logo_datei
 from utils.pdf_shared import build_hr_zeile, embed_unterschrift
 
 _STANDARDTEXT_TYP_SUFFIX = {
@@ -308,12 +309,13 @@ class RechnungPDFBase(FPDF):
         unt = self._unt
         top = 10.0
 
-        logo_pfad = unt.get("logo_pfad") or ""
-        if logo_pfad and Path(logo_pfad).exists():
+        # Issue #454: gespeicherter (ggf. absoluter, systemfremder) Pfad → tatsächliche Datei
+        logo = logo_datei(unt.get("logo_pfad"))
+        if logo:
             try:
-                lw, lh = _logo_abmessungen(logo_pfad)
+                lw, lh = _logo_abmessungen(str(logo))
                 if lw > 0:
-                    self.image(logo_pfad, x=L_MARGIN, y=top, w=lw, h=lh)
+                    self.image(str(logo), x=L_MARGIN, y=top, w=lw, h=lh)
             except Exception:
                 pass
 

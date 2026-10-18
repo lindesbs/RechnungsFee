@@ -88,6 +88,10 @@ function LogoSektion({
   const [fehler, setFehler] = useState<string | null>(null)
   const [cacheBust, setCacheBust] = useState(Date.now())
   const [logoSrc, setLogoSrc] = useState<string>('')
+  // Issue #454: Logo hinterlegt, Datei aber nicht auffindbar (z. B. nach Wiederherstellung nur der
+  // Datenbank) - einmal neu versuchen, dann Hinweis statt endloser Neuladeversuche
+  const [ladeVersuch, setLadeVersuch] = useState(0)
+  const logoFehlt = logoVorhanden && ladeVersuch >= 2
   useEffect(() => {
     getLogoUrl().then((url) => setLogoSrc(`${url}?v=${cacheBust}`))
   }, [cacheBust])
@@ -96,6 +100,7 @@ function LogoSektion({
     mutationFn: (file: File) => uploadLogo(file),
     onSuccess: (u) => {
       setFehler(null)
+      setLadeVersuch(0)
       setCacheBust(Date.now())
       qc.invalidateQueries({ queryKey: ['unternehmen'] })
       onUploaded(u)
@@ -122,12 +127,18 @@ function LogoSektion({
   return (
     <div className="flex items-start gap-6">
       <div className="w-28 h-20 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center overflow-hidden bg-slate-50 dark:bg-slate-900 flex-shrink-0">
-        {logoVorhanden ? (
+        {logoFehlt ? (
+          <span className="text-amber-500 text-3xl" title="Logo-Datei nicht gefunden">⚠</span>
+        ) : logoVorhanden ? (
           <img
             src={logoSrc}
             alt="Firmenlogo"
             className="max-w-full max-h-full object-contain"
-            onError={() => setCacheBust(Date.now())}
+            onLoad={() => setLadeVersuch(0)}
+            onError={() => {
+              setLadeVersuch(v => v + 1)
+              if (ladeVersuch < 1) setCacheBust(Date.now())
+            }}
           />
         ) : (
           <span className="text-slate-300 text-3xl">🏢</span>
@@ -161,6 +172,12 @@ function LogoSektion({
           </button>
         )}
         <p className="text-xs text-slate-400 dark:text-slate-500">PNG, JPEG, WEBP oder SVG · max. 2 MB</p>
+        {logoFehlt && (
+          <p className="text-xs text-amber-700 dark:text-amber-400 max-w-xs">
+            Die Logo-Datei wurde nicht gefunden – z. B. nach der Wiederherstellung nur der Datenbank.
+            Bitte das Logo neu hochladen, sonst fehlt es auf Rechnungen und Mahnungen.
+          </p>
+        )}
         {fehler && <p className="text-xs text-red-600 dark:text-red-400">{fehler}</p>}
       </div>
     </div>

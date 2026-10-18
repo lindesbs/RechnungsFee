@@ -21,6 +21,7 @@ from utils.pdf_rechnung_base import (
     GRAU_RAND, TEXT_GRAU, TEXT_DUNKEL,
     _find_dejavu_dir, _adresszeilen, _logo_abmessungen, _person_bezeichnung,
 )
+from utils.logo import logo_datei
 from utils.pdf_shared import epc_qr_bytes, build_hr_zeile, embed_unterschrift
 
 
@@ -71,12 +72,13 @@ class MahnungPDF(FPDF):
         unt = self.unt
         top = 10.0
 
-        logo_pfad = unt.get("logo_pfad") or ""
-        if logo_pfad and Path(logo_pfad).exists():
+        # Issue #454: gespeicherter (ggf. absoluter, systemfremder) Pfad → tatsächliche Datei
+        logo = logo_datei(unt.get("logo_pfad"))
+        if logo:
             try:
-                lw, lh = _logo_abmessungen(logo_pfad)
+                lw, lh = _logo_abmessungen(str(logo))
                 if lw > 0:
-                    self.image(logo_pfad, x=L_MARGIN, y=top, w=lw, h=lh)
+                    self.image(str(logo), x=L_MARGIN, y=top, w=lw, h=lh)
             except Exception:
                 pass
 
