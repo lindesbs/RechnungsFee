@@ -32,9 +32,9 @@ logging.root.setLevel(logging.INFO)
 logging.root.addHandler(_log_handler)
 # ─────────────────────────────────────────────────────────────────────────────
 from database.seed import run_all_seeds
-from api import unternehmen, konten, kategorien, setup, journal, kunden, lieferanten, tagesabschluss, nummernkreise, export, rechnungen, backup, artikel, artikel_gruppen, ust_saetze, pdf_vorlagen, eks, system, ustva, zm, euer, dokumentenpakete, mail, wiederkehrend, buchungsvorlagen, anlageverzeichnis, datev, anlage_s, anlage_g, fristen_api, guv, bank_templates, bank_import, auto_filter, forderungen, cockpit, datenmigration, kontenuebersicht, schnellbuchungen, mahnwesen, profile, kontokorrent, inventurliste
+from api import unternehmen, konten, kategorien, setup, journal, kunden, lieferanten, tagesabschluss, nummernkreise, export, rechnungen, backup, artikel, artikel_gruppen, ust_saetze, pdf_vorlagen, eks, system, ustva, zm, euer, dokumentenpakete, mail, wiederkehrend, buchungsvorlagen, anlageverzeichnis, datev, anlage_s, anlage_g, fristen_api, guv, bank_templates, bank_import, auto_filter, forderungen, cockpit, datenmigration, kontenuebersicht, schnellbuchungen, mahnwesen, profile, kontokorrent, inventurliste, postfach
 
-SCHEMA_VERSION = 169
+SCHEMA_VERSION = 170
 
 app = FastAPI(title="RechnungsFee API", version="0.1.0")
 
@@ -78,6 +78,7 @@ app.include_router(euer.router)
 app.include_router(system.router)
 app.include_router(dokumentenpakete.router)
 app.include_router(mail.router)
+app.include_router(postfach.router)
 app.include_router(wiederkehrend.router)
 app.include_router(buchungsvorlagen.router)
 app.include_router(anlageverzeichnis.router)
@@ -3764,6 +3765,27 @@ def _run_migrations() -> None:
             conn.execute(text("PRAGMA user_version = 169"))
             conn.commit()
             print("[Migration] Schema auf Version 169 (Issue #442: unternehmen.backup_extern_anzahl – Rotation externer Backups)")
+
+        if version < 170:
+            # Issue #451: Rechnungspostfach per IMAP. Tabelle postfach_eingang legt create_all() an.
+            cols170 = {r[1] for r in conn.execute(text("PRAGMA table_info(unternehmen)")).fetchall()}
+            for col, typ in (
+                ("postfach_aktiv",              "BOOLEAN NOT NULL DEFAULT 0"),
+                ("imap_host",                   "VARCHAR(200)"),
+                ("imap_port",                   "INTEGER NOT NULL DEFAULT 993"),
+                ("imap_ssl",                    "BOOLEAN NOT NULL DEFAULT 1"),
+                ("imap_user",                   "VARCHAR(200)"),
+                ("imap_passwort",               "TEXT"),
+                ("imap_ordner",                 "VARCHAR(200) NOT NULL DEFAULT 'INBOX'"),
+                ("imap_beim_start",             "BOOLEAN NOT NULL DEFAULT 0"),
+                ("imap_zertifikat_ignorieren",  "BOOLEAN NOT NULL DEFAULT 0"),
+                ("imap_zertifikat_fingerprint", "VARCHAR(64)"),
+            ):
+                if col not in cols170:
+                    conn.execute(text(f"ALTER TABLE unternehmen ADD COLUMN {col} {typ}"))
+            conn.execute(text("PRAGMA user_version = 170"))
+            conn.commit()
+            print("[Migration] Schema auf Version 170 (Issue #451: Rechnungspostfach per IMAP – unternehmen.postfach_aktiv/imap_*)")
 
 
 def _migrate_kategorien() -> None:

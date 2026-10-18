@@ -241,6 +241,17 @@ export type Unternehmen = {
   smtp_zertifikat_ignorieren?: boolean
   smtp_zertifikat_fingerprint?: string | null
   thunderbird_aktiv?: boolean
+  // Issue #451: Rechnungspostfach per IMAP
+  postfach_aktiv?: boolean
+  imap_host?: string | null
+  imap_port?: number
+  imap_ssl?: boolean
+  imap_user?: string | null
+  imap_passwort?: string | null
+  imap_ordner?: string
+  imap_beim_start?: boolean
+  imap_zertifikat_ignorieren?: boolean
+  imap_zertifikat_fingerprint?: string | null
   zugferd_anhaenge_aktiv?: boolean
   unterschrift_bild?: string | null
   unterschrift_auf_rechnung?: boolean
@@ -2230,6 +2241,52 @@ export const sendeTestMail = (an: string) =>
     method: 'POST',
     body: JSON.stringify({ an }),
   })
+
+// --- Rechnungspostfach (Issue #451) ---
+export type PostfachEintrag = {
+  id: number
+  original_name: string
+  mime_type: string
+  dateigroesse: number
+  absender?: string | null
+  betreff?: string | null
+  mail_datum?: string | null
+  status: 'offen' | 'uebernommen' | 'verworfen'
+  rechnung_id?: number | null
+  erstellt_am?: string | null
+}
+
+export type PostfachAbrufErgebnis = {
+  mails_geprueft: number
+  mails_verschoben: number
+  neu: number
+  dubletten: number
+  uebersprungen: string[]
+  weitere_mails: boolean
+}
+
+export const postfachTesten = () =>
+  request<{ ok: boolean; ordner: string; anzahl_mails: number }>('/postfach/test', { method: 'POST' })
+export const postfachAbrufen = () =>
+  request<PostfachAbrufErgebnis>('/postfach/abrufen', { method: 'POST' })
+export const getPostfachEingang = () =>
+  request<PostfachEintrag[]>('/postfach/eingang')
+export const postfachDateiPfad = (id: number) => `/postfach/eingang/${id}/datei`
+export const postfachUebernommen = (id: number, rechnungId: number | null) =>
+  request<PostfachEintrag>(`/postfach/eingang/${id}/uebernommen`, {
+    method: 'POST',
+    body: JSON.stringify({ rechnung_id: rechnungId }),
+  })
+export const postfachVerwerfen = (id: number) =>
+  request<PostfachEintrag>(`/postfach/eingang/${id}/verwerfen`, { method: 'POST' })
+
+/** Datei eines Postfach-Eintrags als File holen - für den unveränderten Einzelimport. */
+export async function ladePostfachDatei(e: PostfachEintrag): Promise<File> {
+  const base = await getApiBase()
+  const res = await fetch(`${base}${postfachDateiPfad(e.id)}`)
+  if (!res.ok) throw new Error('Datei aus dem Postfach-Eingang konnte nicht geladen werden.')
+  return new File([await res.blob()], e.original_name, { type: e.mime_type })
+}
 
 // ---------------------------------------------------------------------------
 // Wiederkehrende Ausgangsrechnungen

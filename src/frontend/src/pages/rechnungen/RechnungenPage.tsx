@@ -18,6 +18,8 @@ import {
   getMahnwesenEinstellungen, getRechnungMahnungen,
   getZugferdAnhaenge, uploadZugferdAnhang, deleteZugferdAnhang,
   type Rechnung, type RechnungCreate, type RechnungspositionCreate, type BarZahlungCreate, type BarZahlungResult,
+  getPostfachEingang, postfachAbrufen, postfachVerwerfen, postfachUebernommen, postfachDateiPfad, ladePostfachDatei,
+  type PostfachEintrag, type PostfachAbrufErgebnis,
   type ArtikelSuche, type ArtikelTyp, type AnalyseErgebnis, type LieferantVorschlag, type ZahlungSplitPosition, type ZahlungKompakt,
   type RechnungVorschauRequest,
 } from '../../api/client'
@@ -4480,15 +4482,144 @@ function LieferantVorschlagBox({ vorschlaege }: { vorschlaege: LieferantVorschla
 
 
 // ---------------------------------------------------------------------------
+// Postfach-Eingang (Issue #451) – Importliste aus dem Rechnungspostfach
+// ---------------------------------------------------------------------------
+
+function PostfachDialog({
+  onClose,
+  onUebernehmen,
+}: {
+  onClose: () => void
+  onUebernehmen: (eintrag: PostfachEintrag) => void
+}) {
+  const qc = useQueryClient()
+  const { data: eintraege, isLoading } = useQuery({ queryKey: ['postfach-eingang'], queryFn: getPostfachEingang })
+  const [abrufErgebnis, setAbrufErgebnis] = useState<PostfachAbrufErgebnis | null>(null)
+  const [fehlerText, setFehlerText] = useState<string | null>(null)
+  const [verwerfenId, setVerwerfenId] = useState<number | null>(null)
+  const [ladeId, setLadeId] = useState<number | null>(null)
+
+  const abrufMut = useMutation({
+    mutationFn: postfachAbrufen,
+    onSuccess: (r) => { setAbrufErgebnis(r); setFehlerText(null); qc.invalidateQueries({ queryKey: ['postfach-eingang'] }) },
+    onError: (e: Error) => { setFehlerText(e.message); setAbrufErgebnis(null) },
+  })
+  const verwerfenMut = useMutation({
+    mutationFn: (id: number) => postfachVerwerfen(id),
+    onSuccess: () => { setVerwerfenId(null); qc.invalidateQueries({ queryKey: ['postfach-eingang'] }) },
+    onError: (e: Error) => setFehlerText(e.message),
+  })
+
+  async function ansehen(e: PostfachEintrag) {
+    const base = import.meta.env.DEV
+      ? `${window.location.protocol}//${window.location.host}/api`
+      : await getApiBase()
+    await openUrl(`${base}${postfachDateiPfad(e.id)}`)
+  }
+
+  async function uebernehmen(e: PostfachEintrag) {
+    setLadeId(e.id)
+    try { onUebernehmen(e) } finally { setLadeId(null) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col">
+        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between gap-3">
+          <h3 className="font-semibold text-slate-800 dark:text-slate-100">📬 Rechnungspostfach</h3>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => abrufMut.mutate()} disabled={abrufMut.isPending}
+              className="px-4 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50">
+              {abrufMut.isPending ? 'Rufe ab…' : 'Postfach abrufen'}
+            </button>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xl leading-none px-1">×</button>
+          </div>
+        </div>
+
+        <div className="px-6 py-4 space-y-3 overflow-y-auto">
+          {fehlerText && (
+            <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2 text-sm text-red-700 dark:text-red-300">{fehlerText}</div>
+          )}
+          {abrufErgebnis && (
+            <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-600 dark:text-slate-300 space-y-1">
+              <p>
+                {abrufErgebnis.mails_geprueft} Mail{abrufErgebnis.mails_geprueft === 1 ? '' : 's'} geprüft ·{' '}
+                <strong>{abrufErgebnis.neu} neue Rechnung{abrufErgebnis.neu === 1 ? '' : 'en'}</strong>
+                {abrufErgebnis.dubletten > 0 && <> · {abrufErgebnis.dubletten} bereits bekannt</>}
+                {abrufErgebnis.mails_verschoben > 0 && <> · {abrufErgebnis.mails_verschoben} nach „RechnungsFee/verarbeitet“ verschoben</>}
+              </p>
+              {abrufErgebnis.weitere_mails && <p className="text-amber-700 dark:text-amber-300">Es liegen noch weitere Mails im Ordner – bitte erneut abrufen.</p>}
+              {abrufErgebnis.uebersprungen.map((h, i) => <p key={i} className="text-amber-700 dark:text-amber-300">⚠ {h}</p>)}
+            </div>
+          )}
+
+          {isLoading ? (
+            <p className="text-sm text-slate-400">Lade…</p>
+          ) : !eintraege?.length ? (
+            <p className="text-sm text-slate-500 dark:text-slate-400 py-6 text-center">
+              Keine offenen Rechnungen aus dem Postfach.{!abrufErgebnis && ' Mit „Postfach abrufen" neue Mails holen.'}
+            </p>
+          ) : (
+            <ul className="divide-y divide-slate-100 dark:divide-slate-700">
+              {eintraege.map((e) => (
+                <li key={e.id} className="py-3 flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">{e.betreff || '(ohne Betreff)'}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                      {e.absender}{e.mail_datum && <> · {new Date(e.mail_datum).toLocaleDateString('de-DE')}</>}
+                    </p>
+                    <p className="text-xs text-slate-400 dark:text-slate-500 truncate">
+                      {e.mime_type === 'application/xml' ? '🧾' : '📄'} {e.original_name} · {(e.dateigroesse / 1024).toFixed(0)} KB
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {verwerfenId === e.id ? (
+                      <>
+                        <span className="text-xs text-slate-500 dark:text-slate-400">Wirklich verwerfen?</span>
+                        <button onClick={() => verwerfenMut.mutate(e.id)} disabled={verwerfenMut.isPending}
+                          className="px-2.5 py-1 text-xs bg-red-600 hover:bg-red-700 text-white rounded-lg disabled:opacity-50">Ja</button>
+                        <button onClick={() => setVerwerfenId(null)}
+                          className="px-2.5 py-1 text-xs border border-slate-300 dark:border-slate-600 rounded-lg text-slate-600 dark:text-slate-300">Nein</button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={() => ansehen(e)}
+                          className="px-2.5 py-1 text-xs border border-slate-300 dark:border-slate-600 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">Ansehen</button>
+                        <button onClick={() => setVerwerfenId(e.id)}
+                          className="px-2.5 py-1 text-xs border border-slate-300 dark:border-slate-600 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">Verwerfen</button>
+                        <button onClick={() => uebernehmen(e)} disabled={ladeId === e.id}
+                          className="px-3 py-1 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50">Übernehmen</button>
+                      </>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="text-xs text-slate-400 dark:text-slate-500">
+            „Übernehmen" öffnet den gewohnten Import mit dieser Datei – du prüfst die erkannten Daten und speicherst wie
+            beim Einzelimport, die Datei wird als Beleg angehängt. „Verwerfen" ist für Anhänge, die keine Rechnung sind
+            (z. B. AGB); sie werden beim nächsten Abruf nicht erneut angeboten.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Import-Dialog (Stufe 2 – ZUGFeRD/XRechnung)
 // ---------------------------------------------------------------------------
 
 function ImportDialog({
   onClose,
   onWeiter,
+  startDatei,
 }: {
   onClose: () => void
   onWeiter: (ergebnis: AnalyseErgebnis, datei: File) => void
+  // Issue #451: Datei aus dem Postfach-Eingang - startet sofort die Analyse wie nach einem Upload
+  startDatei?: File | null
 }) {
   const [schritt, setSchritt] = useState<'upload' | 'ergebnis'>('upload')
   const [ergebnis, setErgebnis] = useState<AnalyseErgebnis | null>(null)
@@ -4496,6 +4627,11 @@ function ImportDialog({
   const [laedt, setLaedt] = useState(false)
   const [datei, setDatei] = useState<File | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (startDatei) handleDatei(startDatei)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startDatei])
 
   async function handleDatei(f: File) {
     setDatei(f)
@@ -4873,6 +5009,11 @@ export function RechnungenPage({ modus = 'rechnungen' }: { modus?: 'rechnungen' 
   const [importPrefill, setImportPrefill] = useState<AnalyseErgebnis | null>(null)
   const [importDatei, setImportDatei] = useState<File | null>(null)
   const [importKey, setImportKey] = useState(0)
+  // Issue #451: Import aus dem Postfach-Eingang - Startdatei für den Import-Dialog und Eintrag,
+  // der nach dem Speichern als übernommen markiert wird
+  const [zeigPostfach, setZeigPostfach] = useState(false)
+  const [importStartDatei, setImportStartDatei] = useState<File | null>(null)
+  const [importPostfachId, setImportPostfachId] = useState<number | null>(null)
   const [activeVorlageId, setActiveVorlageId] = useState<number | null>(null)
   const [selectedLsIds, setSelectedLsIds] = useState<Set<number>>(new Set())
   const [zeigSammelrechnung, setZeigSammelrechnung] = useState(false)
@@ -4909,6 +5050,13 @@ export function RechnungenPage({ modus = 'rechnungen' }: { modus?: 'rechnungen' 
 
   const { data: unternehmen } = useQuery({ queryKey: ['unternehmen'], queryFn: getUnternehmen })
   const lieferscheinAktiv = !!unternehmen?.lieferschein_aktiv
+  const postfachAktiv = !!unternehmen?.postfach_aktiv
+  const { data: postfachEintraege } = useQuery({
+    queryKey: ['postfach-eingang'],
+    queryFn: getPostfachEingang,
+    enabled: postfachAktiv,
+  })
+  const postfachOffen = postfachEintraege?.length ?? 0
 
   const { data: mahnwesenEinst } = useQuery({
     queryKey: ['mahnwesen-einstellungen'],
@@ -4949,6 +5097,11 @@ export function RechnungenPage({ modus = 'rechnungen' }: { modus?: 'rechnungen' 
       if (importDatei) {
         try { await uploadBeleg(r.id, importDatei) } catch {}
         setImportDatei(null)
+      }
+      if (importPostfachId) {
+        try { await postfachUebernommen(importPostfachId, r.id) } catch {}
+        setImportPostfachId(null)
+        qc.invalidateQueries({ queryKey: ['postfach-eingang'] })
       }
       if (activeVorlageId) {
         try { await erledigtVorlage(activeVorlageId) } catch {}
@@ -5100,11 +5253,29 @@ export function RechnungenPage({ modus = 'rechnungen' }: { modus?: 'rechnungen' 
 
   return (
     <div className="flex h-full">
+      {zeigPostfach && (
+        <PostfachDialog
+          onClose={() => setZeigPostfach(false)}
+          onUebernehmen={async (eintrag) => {
+            try {
+              const datei = await ladePostfachDatei(eintrag)
+              setZeigPostfach(false)
+              setImportPostfachId(eintrag.id)
+              setImportStartDatei(datei)
+              setZeigImport(true)
+            } catch (e) {
+              setFehler((e as Error).message)
+            }
+          }}
+        />
+      )}
       {zeigImport && (
         <ImportDialog
-          onClose={() => setZeigImport(false)}
+          startDatei={importStartDatei}
+          onClose={() => { setZeigImport(false); setImportStartDatei(null); setImportPostfachId(null) }}
           onWeiter={(ergebnis, datei) => {
             setZeigImport(false)
+            setImportStartDatei(null)
             setImportPrefill(ergebnis)
             setImportDatei(datei)
             setTyp('eingang')
@@ -5144,16 +5315,25 @@ export function RechnungenPage({ modus = 'rechnungen' }: { modus?: 'rechnungen' 
                   </button>
                 </div>
               )}
+              {typ === 'eingang' && postfachAktiv && (
+                <button
+                  onClick={() => setZeigPostfach(true)}
+                  title="Rechnungen aus dem Mailpostfach übernehmen"
+                  className="px-4 py-2 text-sm font-medium border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-950 transition-colors"
+                >
+                  📬 Postfach{postfachOffen > 0 && <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 text-xs font-semibold bg-blue-600 text-white rounded-full">{postfachOffen}</span>}
+                </button>
+              )}
               {typ === 'eingang' && (
                 <button
-                  onClick={() => setZeigImport(true)}
+                  onClick={() => { setImportPostfachId(null); setImportStartDatei(null); setZeigImport(true) }}
                   className="px-4 py-2 text-sm font-medium border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-950 transition-colors"
                 >
                   ↑ Importieren
                 </button>
               )}
               <button
-                onClick={() => { setFormModus('neu'); setSelectedId(null); setImportPrefill(null) }}
+                onClick={() => { setFormModus('neu'); setSelectedId(null); setImportPrefill(null); setImportPostfachId(null) }}
                 className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors"
               >
                 {lieferscheinModus ? '+ Neuer Lieferschein' : istAbschlagSeite ? '+ Neue Abschlagsrechnung' : '+ Neue Rechnung'}

@@ -68,7 +68,8 @@ jeder Entwurf wird vom Nutzer geprüft. Gerade seit der E-Rechnungs-Empfangspfli
 kommen Rechnungen überwiegend per Mail. Zwei Zugangswege mit gemeinsamem Kern
 (Anhang → bestehende PDF/XML-Analyse → Entwurf + Beleg, SHA-256-Dublettenschutz):
 
-- [ ] **Stufe 1 – IMAP direkt** (zuerst): Postfach in den Einstellungen (Host/Port/SSL/Benutzer/
+- [x] **Stufe 1 – IMAP direkt** (v0.7.4, `api/postfach.py`; umgesetzt als Importliste statt
+  automatischer Entwürfe – „Übernehmen" startet den unveränderten Einzelimport): Postfach in den Einstellungen (Host/Port/SSL/Benutzer/
   Passwort/Ordner), Abruf beim Start und per Knopf „Postfach abrufen“; verarbeitete Mails
   wandern in einen Unterordner „RechnungsFee/verarbeitet“ (sichtbar im Mailprogramm, übersteht
   Neuinstallationen – kein UID-Tracking nötig). Unabhängig vom Mailprogramm (Gerti: Aerion).

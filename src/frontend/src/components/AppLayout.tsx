@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getTagesabschlussFehltGestern, getUnternehmen, pruefZM, pruefenWiederkehrend, getFaelligeBuchungsvorlagen, getMahnwesenEinstellungen, getProfile, openUrl, isTauri, type EntwurfErgebnis } from '../api/client'
+import { getTagesabschlussFehltGestern, getUnternehmen, pruefZM, pruefenWiederkehrend, getFaelligeBuchungsvorlagen, getMahnwesenEinstellungen, getProfile, openUrl, isTauri, postfachAbrufen, type EntwurfErgebnis } from '../api/client'
 import { TagesabschlussDialog } from '../pages/journal/TagesabschlussDialog'
 import { useUpdateCheck } from '../hooks/useUpdateCheck'
 import { useAnsicht } from '../hooks/useAnsicht'
@@ -30,6 +30,9 @@ const buchhaltungNavOptional: { to: string; label: string; icon: string; zeigen:
 ]
 
 import type { Unternehmen, ZMPruefung } from '../api/client'
+
+// Issue #451: Postfach-Abruf beim Start nur einmal pro App-Sitzung
+let postfachStartAbrufErledigt = false
 
 type NavKontext = { unt: Unternehmen | undefined; zm: ZMPruefung | undefined }
 type ZeigenFn = (k: NavKontext) => boolean
@@ -322,6 +325,17 @@ export function AppLayout() {
     queryFn: getUnternehmen,
     staleTime: 1000 * 60 * 5,
   })
+
+  // Issue #451: Rechnungspostfach beim Start abrufen (opt-in). Einmal pro App-Sitzung - das Flag
+  // liegt bewusst auf Modulebene, damit ein Neu-Mount des Layouts keinen zweiten Abruf auslöst.
+  const qcPostfach = useQueryClient()
+  useEffect(() => {
+    if (postfachStartAbrufErledigt || !unt?.postfach_aktiv || !unt.imap_beim_start) return
+    postfachStartAbrufErledigt = true
+    postfachAbrufen()
+      .then(() => qcPostfach.invalidateQueries({ queryKey: ['postfach-eingang'] }))
+      .catch((e) => console.warn('[RechnungsFee] Postfach-Abruf beim Start fehlgeschlagen:', e))
+  }, [unt?.postfach_aktiv, unt?.imap_beim_start]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Nur relevant/sichtbar sobald mehr als ein Profil existiert - bei genau einem Profil
   // (der Normalfall) wäre die Anzeige nur Rauschen, siehe Profile.md.

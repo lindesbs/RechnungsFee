@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import {
-  getUnternehmen, updateUnternehmen, uploadLogo, deleteLogo, getLogoUrl, sendeTestMail, getProfile, isTauri,
+  getUnternehmen, updateUnternehmen, uploadLogo, deleteLogo, getLogoUrl, sendeTestMail, postfachTesten, getProfile, isTauri,
   type Unternehmen,
 } from '../../api/client'
 import { InfoTooltip } from '../../components/InfoTooltip'
@@ -1550,6 +1550,181 @@ function SmtpSektion({ data }: { data: Unternehmen }) {
 }
 
 // ---------------------------------------------------------------------------
+// Rechnungspostfach (IMAP, Issue #451)
+// ---------------------------------------------------------------------------
+
+function PostfachSektion({ data }: { data: Unternehmen }) {
+  const qc = useQueryClient()
+  const [aktiv, setAktiv] = useState(data.postfach_aktiv ?? false)
+  const [host, setHost] = useState(data.imap_host ?? '')
+  const [port, setPort] = useState(String(data.imap_port ?? 993))
+  const [ssl, setSsl] = useState(data.imap_ssl ?? true)
+  const [user, setUser] = useState(data.imap_user ?? '')
+  const [passwort, setPasswort] = useState(data.imap_passwort ?? '')
+  const [ordner, setOrdner] = useState(data.imap_ordner ?? 'INBOX')
+  const [beimStart, setBeimStart] = useState(data.imap_beim_start ?? false)
+  const [zertifikatIgnorieren, setZertifikatIgnorieren] = useState(data.imap_zertifikat_ignorieren ?? false)
+  const fingerprint = data.imap_zertifikat_fingerprint
+  const [gespeichert, setGespeichert] = useState(false)
+  const [fehler, setFehler] = useState<string | null>(null)
+  const [testStatus, setTestStatus] = useState<'idle' | 'laeuft' | 'ok' | 'error'>('idle')
+  const [testText, setTestText] = useState<string | null>(null)
+
+  const zertifikatZuruecksetzenMut = useMutation({
+    mutationFn: () => updateUnternehmen({ imap_zertifikat_fingerprint: null }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['unternehmen'] }),
+  })
+
+  const mut = useMutation({
+    mutationFn: () => updateUnternehmen({
+      postfach_aktiv: aktiv,
+      imap_host: host.trim() || null,
+      imap_port: parseInt(port) || (ssl ? 993 : 143),
+      imap_ssl: ssl,
+      imap_user: user.trim() || null,
+      imap_passwort: passwort || null,
+      imap_ordner: ordner.trim() || 'INBOX',
+      imap_beim_start: beimStart,
+      imap_zertifikat_ignorieren: zertifikatIgnorieren,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['unternehmen'] })
+      setGespeichert(true)
+      setFehler(null)
+      setTimeout(() => setGespeichert(false), 2500)
+    },
+    onError: (e: Error) => setFehler(e.message),
+  })
+
+  async function handleTest() {
+    setTestStatus('laeuft')
+    setTestText(null)
+    try {
+      const r = await postfachTesten()
+      setTestStatus('ok')
+      setTestText(`Verbindung OK – Ordner „${r.ordner}" enthält ${r.anzahl_mails} Mail${r.anzahl_mails === 1 ? '' : 's'}.`)
+      qc.invalidateQueries({ queryKey: ['unternehmen'] })  // ggf. neu gemerktes Zertifikat anzeigen
+    } catch (e: any) {
+      setTestStatus('error')
+      setTestText(e?.message ?? 'Unbekannter Fehler')
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center gap-3">
+        <label className="relative inline-flex items-center cursor-pointer">
+          <input type="checkbox" checked={aktiv} onChange={e => setAktiv(e.target.checked)} className="sr-only peer" />
+          <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:bg-blue-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all" />
+        </label>
+        <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Rechnungspostfach aktivieren</span>
+      </div>
+
+      {aktiv && (
+        <div className="space-y-4">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            PDF- und XML-Anhänge aus diesem Postfach landen unter <strong>Eingangsrechnungen → Postfach</strong> in einer
+            Importliste. Jede Rechnung übernimmst du von dort einzeln – genau wie beim Import einer einzelnen Datei.
+            Verarbeitete Mails verschiebt RechnungsFee in den Unterordner „RechnungsFee/verarbeitet“, Mails ohne
+            Rechnungsanhang bleiben unberührt. Am besten ein eigenes Postfach oder einen eigenen Ordner nur für
+            Eingangsrechnungen verwenden.
+          </p>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2">
+              <Field label="IMAP-Server (Host)">
+                <input type="text" value={host} onChange={e => setHost(e.target.value)} placeholder="imap.example.de" className={inputCls} />
+              </Field>
+            </div>
+            <Field label="Port">
+              <input type="number" value={port} onChange={e => setPort(e.target.value)} placeholder="993" className={inputCls} />
+            </Field>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <input type="checkbox" id="imap-ssl" checked={ssl}
+              onChange={e => { setSsl(e.target.checked); setPort(e.target.checked ? '993' : '143') }} className="rounded" />
+            <label htmlFor="imap-ssl" className="text-sm text-slate-600 dark:text-slate-300">SSL/TLS (Port 993) statt STARTTLS (Port 143)</label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Benutzername / E-Mail">
+              <input type="text" value={user} onChange={e => setUser(e.target.value)} placeholder="rechnungen@firma.de" className={inputCls} />
+            </Field>
+            <Field label="Passwort / App-Passwort">
+              <input type="password" value={passwort} onChange={e => setPasswort(e.target.value)} placeholder="••••••••" className={inputCls} />
+            </Field>
+          </div>
+
+          <Field label={<>Ordner <span className="text-xs text-slate-400 font-normal">(Standard: INBOX = Posteingang)</span></>}>
+            <input type="text" value={ordner} onChange={e => setOrdner(e.target.value)} placeholder="INBOX" className={inputCls} />
+          </Field>
+
+          <div className="flex items-center gap-3">
+            <input type="checkbox" id="imap-start" checked={beimStart} onChange={e => setBeimStart(e.target.checked)} className="rounded" />
+            <label htmlFor="imap-start" className="text-sm text-slate-600 dark:text-slate-300">Beim Start von RechnungsFee automatisch abrufen</label>
+          </div>
+
+          <div className="bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-xl p-3 text-xs text-amber-700 dark:text-amber-300">
+            <strong>Microsoft-Konten (Outlook.com/Microsoft 365)</strong> werden noch nicht unterstützt – dort ist eine
+            OAuth-Anmeldung vorgeschrieben. <strong>Gmail:</strong> App-Passwort verwenden, Host imap.gmail.com, Port 993.
+          </div>
+
+          <div className="flex items-start gap-3">
+            <input type="checkbox" id="imap-zertifikat-ignorieren" checked={zertifikatIgnorieren}
+              onChange={e => setZertifikatIgnorieren(e.target.checked)} className="rounded mt-0.5" />
+            <label htmlFor="imap-zertifikat-ignorieren" className="text-sm text-slate-600 dark:text-slate-300">
+              Selbstsigniertes Zertifikat akzeptieren
+              <span className="block text-xs text-slate-400 dark:text-slate-500 font-normal mt-0.5">
+                Nur für einen vertrauenswürdigen eigenen Mailserver, wenn der Verbindungstest mit „Zertifikatsprüfung
+                fehlgeschlagen" abbricht. Das Zertifikat wird beim nächsten Abruf einmalig gemerkt – zeigt der Server
+                danach ein anderes, bricht RechnungsFee ab, bevor Zugangsdaten gesendet werden.
+              </span>
+            </label>
+          </div>
+
+          {zertifikatIgnorieren && (
+            <div className="ml-7 text-xs">
+              {fingerprint ? (
+                <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+                  <span>Akzeptiertes Zertifikat: <span className="font-mono">{fingerprint.slice(0, 16)}…</span></span>
+                  <button type="button" onClick={() => zertifikatZuruecksetzenMut.mutate()}
+                    disabled={zertifikatZuruecksetzenMut.isPending}
+                    className="text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50">
+                    Zurücksetzen
+                  </button>
+                </div>
+              ) : (
+                <span className="text-slate-400 dark:text-slate-500">Noch kein Zertifikat gemerkt – wird beim nächsten Test/Abruf akzeptiert.</span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {fehler && <p className="text-sm text-red-600 dark:text-red-400">{fehler}</p>}
+
+      <div className="flex items-center gap-3 flex-wrap">
+        <button type="button" onClick={() => mut.mutate()} disabled={mut.isPending}
+          className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors">
+          {mut.isPending ? 'Speichern…' : 'Postfach speichern'}
+        </button>
+        {aktiv && (
+          <button type="button" onClick={handleTest} disabled={testStatus === 'laeuft'}
+            className="px-4 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 disabled:opacity-50">
+            {testStatus === 'laeuft' ? 'Prüfe…' : 'Verbindung testen'}
+          </button>
+        )}
+        {gespeichert && <span className="text-sm text-green-600 dark:text-green-400">✓ Gespeichert</span>}
+      </div>
+      {aktiv && <p className="text-xs text-slate-500 dark:text-slate-400">Verbindung erst nach dem Speichern testen. Der Test ändert nichts im Postfach.</p>}
+      {testStatus === 'ok' && <p className="text-sm text-green-600 dark:text-green-400">✓ {testText}</p>}
+      {testStatus === 'error' && <p className="text-sm text-red-600 dark:text-red-400">{testText}</p>}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Mail-Signatur-Sektion
 // ---------------------------------------------------------------------------
 
@@ -1748,6 +1923,14 @@ function EmailSektion({ data }: { data: Unternehmen }) {
           <ThunderbirdSektion data={data} />
         </>
       )}
+
+      <hr className="border-slate-100 dark:border-slate-700" />
+
+      <div className="space-y-1">
+        <h3 className="text-sm font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Rechnungspostfach (IMAP)</h3>
+        <p className="text-xs text-slate-400 dark:text-slate-500">Eingangsrechnungen direkt aus einem Mailpostfach übernehmen.</p>
+      </div>
+      <PostfachSektion data={data} />
 
       <hr className="border-slate-100 dark:border-slate-700" />
 
