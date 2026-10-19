@@ -347,6 +347,21 @@ Wurde in diesem Release etwas an **`konten`**, **`unternehmen`** oder **`kassenb
 Hintergrund: Der Wizard ist der einzige Weg, wie diese drei Tabellen beim Erststart befüllt werden.  
 Fehler dort fallen in Tests nicht auf und treffen nur Neu-Installationen (Issue #102).
 
+### Zweige: `main` (0.7.x) und `release/0.8.0` (Barrierefreiheit)
+
+Seit 2026-10-19 gibt es zwei Entwicklungslinien:
+
+| Zweig | Inhalt | Lokal |
+|-------|--------|-------|
+| `main` | 0.7.x – Fehlerbehebungen und kleinere Funktionen, normale Releases | `~/projekte/RechnungsFee` |
+| `release/0.8.0` | v0.8.0 – Barrierefreiheit & Tastatur (Meilenstein „v0.8.0“, Sammel-Issue #455) | Worktree `~/projekte/RechnungsFee-0.8` |
+
+- Barrierefreiheits-PRs (auch von Mitwirkenden) gehen gegen `release/0.8.0`, **nicht** gegen `main`.
+- Nach jedem 0.7.x-Release `main` in `release/0.8.0` mergen, damit der Zweig aktuell bleibt
+  (Migrationsnummern beachten: neue Migrationen auf `main` haben Vorrang, 0.8-Migrationen danach).
+- Zu v0.8.0 wird `release/0.8.0` einmal in `main` gemergt, dann normal releast (Tag auf `main`).
+- CI (`ci.yml`) läuft für `main` und `release/**`.
+
 ### Neues Release erstellen
 ```bash
 git tag v0.x.y
