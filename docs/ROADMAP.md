@@ -86,6 +86,28 @@ kommen Rechnungen überwiegend per Mail. Zwei Zugangswege mit gemeinsamem Kern
 
 ---
 
+## 📋 ELSTER-Export: Umsatzsteuer-Voranmeldung und Zusammenfassende Meldung (Issue #360)
+
+Wunsch von Peter1061, Recherche von herrschmidt (Issue #360): Kennzahlen nicht mehr in ELSTER abtippen.
+
+- [ ] **Stufe 1 – Datei für den Upload in Mein ELSTER** (keine Registrierung, kein Zertifikat):
+  - UStVA als XML: nur der Nutzdatenteil `Anmeldungssteuern` (Namensraum
+    `http://finkonsens.de/elster/elsteranmeldung/ustva/v20xx`, passendes `version`-Attribut je
+    Jahresversion – häufigste Fehlerursache beim Import), Zeichensatz ISO-8859-15. Reine Ausgabe der
+    bereits berechneten Kennzahlen aus `api/ustva.py` (inkl. ELSTER-Rundung, Issue #428).
+  - Zusammenfassende Meldung als CSV-Meldeliste (Versionstabelle, Satzarten, Länderkennzeichen) aus `api/zm.py`.
+  - Steuernummer ins 13-stellige bundeseinheitliche ELSTER-Format umrechnen (Regeln je Bundesland,
+    `unternehmen.bundesland` vorhanden) – größte Fehlerquelle, gegen offizielle Beispiele prüfen.
+  - Abgleich von Struktur und Beispielen mit dem ERiC-Dokumentationspaket (Entwicklerzugang vorhanden);
+    herrschmidt hat Unterstützung bei der XML-Struktur angeboten.
+  - Absenden bleibt beim Nutzer in Mein ELSTER (eigener Zugang, Prüfung vor dem Senden).
+- [ ] **Stufe 2 – Direktversand per ERiC** (zurückgestellt): Hersteller-Registrierung, eigene
+  Hersteller-ID, Lizenzvertrag, ERiC-Bibliotheken je Plattform bündeln, Zertifikat/PIN je Nutzer,
+  jährliche Pflege (ERiC-Mindestversionen, neue Jahresversionen). Mehrwert: auch Jahreserklärung,
+  Dauerfristverlängerung/Sondervorauszahlung – die nimmt Mein ELSTER nicht per Datei an.
+
+---
+
 ## 📦 Weitere Linux-Paketformate (Debian, Snap) – vor v1.0.0 testen
 
 **Anlass:** Über AppImage/NSIS/DMG hinaus wurden Debian und Snap als mögliche weitere

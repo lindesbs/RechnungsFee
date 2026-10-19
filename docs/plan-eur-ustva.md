@@ -295,7 +295,7 @@ Wirtschaftsgüter mit Anschaffungskosten, jährlicher AfA und Restbuchwert – g
 
 | Thema | Entscheidung |
 |-------|--------------|
-| ELSTER-XML-Export | Erstversion: PDF zur manuellen Übertragung; ELSTER-XML als späteres Feature (erfordert Zertifikat-Handling) |
+| ELSTER-XML-Export | Erstversion: PDF zur manuellen Übertragung. XML-Datei zum Hochladen in Mein ELSTER geht OHNE Zertifikat/Registrierung (Stufe 1, siehe ROADMAP / Issue #360); Zertifikat-Handling nur für Direktversand per ERiC (Stufe 2, zurückgestellt) |
 | AfA-Assistent | Kein AfA-Modul – manuelle Buchung über Phase 1; Steuerberater liefert AfA-Betrag |
 | §25a in EÜR | Korrekt automatisch: Umsatz als normale Einnahme, kein separater USt-Ausweis, `euer_zeile` der Kategorie greift |
 | Bewirtungskosten 70/30 | Zwei Kategorien → zwei EÜR-Zeilen; keine Extra-Logik nötig |
