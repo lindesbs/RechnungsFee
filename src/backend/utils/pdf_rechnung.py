@@ -300,7 +300,7 @@ class RechnungPDF(RechnungPDFBase):
                             y_start = self.get_y()
                             qr_x_sk = L_MARGIN + text_w + 4
                             qr_x_vo = qr_x_sk + qr_sz + qr_gap
-                            self.multi_cell(text_w, 5, hinweis)
+                            self.multi_cell(text_w, 5, hinweis, align="L")
                             self.image(BytesIO(qr_sk),   x=qr_x_sk, y=y_start, w=qr_sz, h=qr_sz)
                             self.image(BytesIO(qr_voll), x=qr_x_vo, y=y_start, w=qr_sz, h=qr_sz)
                             lbl_y = y_start + qr_sz + 1
@@ -328,7 +328,7 @@ class RechnungPDF(RechnungPDFBase):
                             text_w  = NUTZ_W - qr_size - gap
                             y_start = self.get_y()
                             qr_x    = L_MARGIN + text_w + gap
-                            self.multi_cell(text_w, 5, hinweis)
+                            self.multi_cell(text_w, 5, hinweis, align="L")
                             self.image(BytesIO(qr_voll), x=qr_x, y=y_start, w=qr_size, h=qr_size)
                             self.set_font("DejaVu", "", 6)
                             self.set_text_color(*TEXT_GRAU)
@@ -338,7 +338,7 @@ class RechnungPDF(RechnungPDFBase):
                             if self.get_y() < y_start + qr_size + 5:
                                 self.set_y(y_start + qr_size + 5)
                     else:
-                        self.multi_cell(0, 5, hinweis)
+                        self.multi_cell(0, 5, hinweis, align="L")
 
         self.ln(2)
 

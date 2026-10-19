@@ -758,14 +758,14 @@ class RechnungPDFBase(FPDF):
             self.multi_cell(0, 4.5,
                             "Steuerschuldnerschaft des Leistungsempfängers (§13b UStG). "
                             "Diese Rechnung enthält keine Umsatzsteuer.",
-                            new_x="LMARGIN", new_y="NEXT")
+                            new_x="LMARGIN", new_y="NEXT", align="L")
         # §4 Nr. 1b UStG: innergemeinschaftliche Lieferung (Ware) an Unternehmer im EU-Ausland
         ist_eu_lieferung = bool(getattr(r, "ist_eu_lieferung", False))
         if ist_eu_lieferung:
             self.multi_cell(0, 4.5,
                             "Steuerfreie innergemeinschaftliche Lieferung (§4 Nr. 1b i.V.m. §6a UStG). "
                             "Diese Rechnung enthält keine Umsatzsteuer.",
-                            new_x="LMARGIN", new_y="NEXT")
+                            new_x="LMARGIN", new_y="NEXT", align="L")
         # §14a Abs. 1 UStG: bei grenzüberschreitender Dienstleistung (§3a Abs. 2, Reverse Charge)
         # und innergemeinschaftlicher Lieferung (§6a) ist die USt-IdNr. des Leistungsempfängers
         # Pflichtangabe auf der Rechnung - anders als beim rein inländischen §13b-Fall (§14a Abs. 5:
@@ -781,14 +781,14 @@ class RechnungPDFBase(FPDF):
             self.multi_cell(0, 4.5,
                             "Nicht steuerbar in Deutschland - Leistungsort im Drittland (§3a Abs. 2 UStG). "
                             "Diese Rechnung enthält keine Umsatzsteuer.",
-                            new_x="LMARGIN", new_y="NEXT")
+                            new_x="LMARGIN", new_y="NEXT", align="L")
         # §4 Nr. 1a i.V.m. §6 UStG: Ausfuhrlieferung (Ware) ins Drittland (Issue #323)
         ist_ausfuhrlieferung = bool(getattr(r, "ist_ausfuhrlieferung", False))
         if ist_ausfuhrlieferung:
             self.multi_cell(0, 4.5,
                             "Steuerfreie Ausfuhrlieferung (§4 Nr. 1a i.V.m. §6 UStG). "
                             "Diese Rechnung enthält keine Umsatzsteuer.",
-                            new_x="LMARGIN", new_y="NEXT")
+                            new_x="LMARGIN", new_y="NEXT", align="L")
         # §25a-Hinweis: positionsweise, wenn mindestens eine Differenzbesteuerungs-Position vorhanden
         hat_diff = any(getattr(pos, "differenzbesteuerung", False) for pos in (r.positionen or []))
         if hat_diff:
@@ -796,7 +796,7 @@ class RechnungPDFBase(FPDF):
                             "Sonderregelung nach § 25a UStG: Für gekennzeichnete Positionen gilt die "
                             "Differenzbesteuerung (Gebrauchtgegenstände). "
                             "Der Umsatzsteuerbetrag wird nicht gesondert ausgewiesen.",
-                            new_x="LMARGIN", new_y="NEXT")
+                            new_x="LMARGIN", new_y="NEXT", align="L")
         if unt.get("ist_kleinunternehmer") or ist_reverse_charge or ist_eu_lieferung or ist_drittland_leistung or ist_ausfuhrlieferung or hat_diff:
             self.ln(self._ln_nach_19)
 

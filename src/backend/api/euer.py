@@ -327,7 +327,7 @@ def _generate_pdf(daten: dict, unt: Unternehmen) -> bytes:
         pdf.set_text_color(120, 80, 0)
         pdf.multi_cell(170, 5,
             f"Anlagezugänge {daten['jahr']}: {euro(daten['anlage_zugaenge'])} (KFZ, EDV etc.) sind nicht enthalten. "
-            "Bitte Anlage AVEÜR (Abschreibungsplan) separat ausfüllen.", fill=True)
+            "Bitte Anlage AVEÜR (Abschreibungsplan) separat ausfüllen.", fill=True, align="L")
         pdf.ln(4)
 
     pdf.set_fill_color(254, 243, 199)
@@ -336,7 +336,7 @@ def _generate_pdf(daten: dict, unt: Unternehmen) -> bytes:
     pdf.set_text_color(120, 80, 0)
     pdf.multi_cell(170, 5,
         "Hinweis: Anzeigehilfe auf Basis von Journalbuchungen (Ist-Versteuerung / Zuflussprinzip). "
-        "Bitte Werte in ELSTER oder mit dem Steuerberater übertragen.", fill=True)
+        "Bitte Werte in ELSTER oder mit dem Steuerberater übertragen.", fill=True, align="L")
 
     pdf.set_y(-15)
     pdf.set_font("DejaVu", "", 7)
