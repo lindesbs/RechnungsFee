@@ -13,7 +13,7 @@ import {
   getKunden, getLieferanten, getKategorien, getUnternehmen, getApiBase, isTauri, openUrl, openInPdfWindow, downloadPdfForMail,
   getRechnungenExportUrl, korrigiereZahlung,
   getUstSaetze, getKassenstand,
-  uploadBeleg, getBelegUrl, getBelegPdfaUrl, deleteBeleg, analysiereRechnung, analysiereRechnungPfad,
+  uploadBeleg, setzeRechnungExternErstellt, getBelegUrl, getBelegPdfaUrl, deleteBeleg, analysiereRechnung, analysiereRechnungPfad,
   getBuchungsvorlage, erledigtVorlage,
   getMahnwesenEinstellungen, getRechnungMahnungen,
   getZugferdAnhaenge, uploadZugferdAnhang, deleteZugferdAnhang,
@@ -1179,6 +1179,23 @@ function RechnungDetail({
   }
   const { data: unternehmen } = useQuery({ queryKey: ['unternehmen'], queryFn: getUnternehmen, staleTime: 1000 * 60 * 10 })
 
+  // Datenübernahme: „extern erstellt" nachträglich umschalten - nur solange RechnungsFee noch nichts
+  // gedruckt/versendet hat (Backend prüft zusätzlich das gespeicherte Original-PDF)
+  const externUmschaltbar = rechnung.typ === 'ausgang'
+    && (rechnung.dokument_typ ?? 'Rechnung') === 'Rechnung'
+    && !!unternehmen?.datenmigration_aktiv
+    && (!rechnung.import_quelle || rechnung.import_quelle === 'extern')
+    && !rechnung.storniert && !rechnung.ausgegeben && !rechnung.ausgegeben_am
+  const [externFehler, setExternFehler] = useState<string | null>(null)
+  const externMutation = useMutation({
+    mutationFn: (wert: boolean) => setzeRechnungExternErstellt(rechnung.id, wert),
+    onSuccess: () => {
+      setExternFehler(null)
+      qc.invalidateQueries({ queryKey: ['rechnungen'] })
+    },
+    onError: (e: Error) => setExternFehler(e.message),
+  })
+
   const zeigZugferdAnhaenge = rechnung.typ === 'ausgang' && rechnung.ist_entwurf && !!unternehmen?.zugferd_anhaenge_aktiv
   const { data: zugferdAnhaenge = [] } = useQuery({
     queryKey: ['zugferd-anhaenge', rechnung.id],
@@ -1484,6 +1501,26 @@ function RechnungDetail({
               ? 'Extern erstellt – das Original liegt außerhalb von RechnungsFee.'
               : 'Importiert – Original im Altsystem.'}{' '}
             Diese Rechnung bleibt als offener Posten sichtbar, kann aber nicht neu als PDF erzeugt, versendet oder gemahnt werden. Original und ggf. Berichtigung kannst du unten als Beleg anhängen.
+          </div>
+        )}
+
+        {externUmschaltbar && (
+          <div className="text-xs">
+            <button
+              type="button"
+              disabled={externMutation.isPending}
+              onClick={() => {
+                const setzen = !rechnung.import_quelle
+                const frage = setzen
+                  ? 'Diese Rechnung als extern erstellt kennzeichnen? RechnungsFee erzeugt dafür dann kein eigenes PDF mehr, versendet und mahnt sie nicht – maßgeblich ist dein Original.'
+                  : 'Kennzeichnung „extern erstellt" entfernen? Danach kann RechnungsFee wieder ein eigenes PDF erzeugen und versenden.'
+                if (window.confirm(frage)) externMutation.mutate(setzen)
+              }}
+              className="text-amber-700 dark:text-amber-300 hover:underline disabled:opacity-50"
+            >
+              {rechnung.import_quelle ? 'Kennzeichnung „extern erstellt" entfernen' : 'Als extern erstellte Rechnung kennzeichnen (Altbestand)'}
+            </button>
+            {externFehler && <p role="alert" className="mt-1 text-red-600 dark:text-red-400">{externFehler}</p>}
           </div>
         )}
 

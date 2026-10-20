@@ -104,6 +104,46 @@ def test_extern_erstellt_nur_fuer_ausgangsrechnungen(db, extra):
     assert db.query(Rechnung).count() == 0
 
 
+def test_kennzeichnung_nachtraeglich_setzen_und_entfernen(db):
+    from api.rechnungen import ExternErstelltRequest, setze_extern_erstellt
+
+    antwort = create_rechnung(_daten(db, extern_erstellt=False), db=db)
+    assert setze_extern_erstellt(antwort.id, ExternErstelltRequest(extern_erstellt=True), db=db).import_quelle == "extern"
+    with pytest.raises(HTTPException):
+        rechnung_als_pdf(antwort.id, db=db)
+    assert setze_extern_erstellt(antwort.id, ExternErstelltRequest(extern_erstellt=False), db=db).import_quelle is None
+
+
+@pytest.mark.parametrize("feld,wert", [
+    ("ausgegeben", True),
+    ("original_pdf_pfad", "rechnungen/original.pdf"),
+    ("storniert", True),
+])
+def test_kennzeichnung_nach_ausgabe_oder_storno_gesperrt(db, feld, wert):
+    from api.rechnungen import ExternErstelltRequest, setze_extern_erstellt
+
+    antwort = create_rechnung(_daten(db, extern_erstellt=False), db=db)
+    rechnung = db.query(Rechnung).filter(Rechnung.id == antwort.id).one()
+    setattr(rechnung, feld, wert)
+    db.commit()
+    with pytest.raises(HTTPException) as exc:
+        setze_extern_erstellt(rechnung.id, ExternErstelltRequest(extern_erstellt=True), db=db)
+    assert exc.value.status_code == 409
+    assert db.query(Rechnung).filter(Rechnung.id == antwort.id).one().import_quelle is None
+
+
+def test_csv_import_kennzeichnung_bleibt_unveraenderlich(db):
+    from api.rechnungen import ExternErstelltRequest, setze_extern_erstellt
+
+    antwort = create_rechnung(_daten(db, extern_erstellt=False), db=db)
+    rechnung = db.query(Rechnung).filter(Rechnung.id == antwort.id).one()
+    rechnung.import_quelle = "papierkram"
+    db.commit()
+    with pytest.raises(HTTPException) as exc:
+        setze_extern_erstellt(rechnung.id, ExternErstelltRequest(extern_erstellt=False), db=db)
+    assert exc.value.status_code == 409
+
+
 def test_extern_erstellt_nur_mit_aktiver_datenuebernahme(db):
     db.query(Unternehmen).first().datenmigration_aktiv = False
     db.commit()

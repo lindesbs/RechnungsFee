@@ -1727,6 +1727,10 @@ export const finalisiereRechnung = (id: number) =>
 export const markiereRechnungAusgegeben = (id: number) =>
   request<Rechnung>(`/rechnungen/${id}/ausgegeben`, { method: 'POST' })
 
+// Datenübernahme: „extern erstellt" nachträglich setzen/entfernen (nur vor erster Ausgabe)
+export const setzeRechnungExternErstellt = (id: number, extern_erstellt: boolean) =>
+  request<Rechnung>(`/rechnungen/${id}/extern-erstellt`, { method: 'POST', body: JSON.stringify({ extern_erstellt }) })
+
 export async function getRechnungPdf(id: number): Promise<Blob> {
   const base = await getBaseUrl()
   const res = await fetch(`${base}/rechnungen/${id}/pdf`)

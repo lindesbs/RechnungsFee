@@ -1915,6 +1915,41 @@ def markiere_ausgegeben(rechnung_id: int, db: Session = Depends(get_db)):
     return RechnungResponse.from_orm_extended(rechnung)
 
 
+class ExternErstelltRequest(BaseModel):
+    extern_erstellt: bool
+
+
+@router.post("/{rechnung_id}/extern-erstellt", response_model=RechnungResponse)
+def setze_extern_erstellt(rechnung_id: int, data: ExternErstelltRequest, db: Session = Depends(get_db)):
+    """Kennzeichnung „extern erstellt" nachträglich setzen/entfernen (Datenübernahme) - nur solange
+    RechnungsFee noch kein eigenes Original ausgegeben hat, sonst existiert das zweite PDF bereits.
+    CSV-importierte Rechnungen (andere import_quelle) bleiben unangetastet."""
+    rechnung = db.query(Rechnung).filter(Rechnung.id == rechnung_id).first()
+    if not rechnung:
+        raise HTTPException(status_code=404, detail="Rechnung nicht gefunden.")
+    if rechnung.typ != "ausgang" or (rechnung.dokument_typ or "Rechnung") != "Rechnung":
+        raise HTTPException(status_code=422, detail="Nur Ausgangsrechnungen können als extern erstellt gekennzeichnet werden.")
+    unternehmen = db.query(Unternehmen).first()
+    if not (unternehmen and unternehmen.datenmigration_aktiv):
+        raise HTTPException(
+            status_code=422,
+            detail="Extern erstellte Rechnungen lassen sich nur kennzeichnen, wenn unter Einstellungen → Unternehmen → Funktionen die Datenübernahme aktiv ist.",
+        )
+    if rechnung.import_quelle not in (None, "extern"):
+        raise HTTPException(status_code=409, detail="Importierte Rechnung – die Kennzeichnung stammt aus dem CSV-Import und lässt sich nicht ändern.")
+    if rechnung.storniert:
+        raise HTTPException(status_code=409, detail="Stornierte Rechnungen lassen sich nicht mehr umkennzeichnen.")
+    if rechnung.ausgegeben or rechnung.ausgegeben_am or rechnung.original_pdf_pfad:
+        raise HTTPException(
+            status_code=409,
+            detail="Diese Rechnung wurde aus RechnungsFee bereits gedruckt oder versendet – die Kennzeichnung lässt sich nicht mehr ändern.",
+        )
+    rechnung.import_quelle = "extern" if data.extern_erstellt else None
+    db.commit()
+    db.refresh(rechnung)
+    return RechnungResponse.from_orm_extended(rechnung)
+
+
 @router.get("/{rechnung_id}/pdf")
 def rechnung_als_pdf(rechnung_id: int, vorlage: int = -1, download: bool = False, kopie: bool = False, nur_ansehen: bool = False, db: Session = Depends(get_db)):
     """PDF der Rechnung generieren und zurückgeben.
