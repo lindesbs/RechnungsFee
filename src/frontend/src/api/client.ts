@@ -1668,6 +1668,7 @@ export const getRechnung = (id: number) => request<Rechnung>(`/rechnungen/${id}`
 export type RechnungVorschauRequest = {
   typ?: 'eingang' | 'ausgang'
   positionen: RechnungspositionCreate[]
+  kategorie_id?: number  // Issue #459: Fallback-Kategorie für die Reverse-Charge-Erkennung
   eingabemodus: 'netto' | 'brutto'
   rabatt_prozent?: number
   rabatt_betrag?: number

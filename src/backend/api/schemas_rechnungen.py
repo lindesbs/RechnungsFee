@@ -254,6 +254,9 @@ class RechnungVorschauRequest(BaseModel):
     # und schicken typ nicht mit - nur RechnungenPage.tsx setzt es explizit fuer Eingang/Ausgang.
     typ: str = "ausgang"
     positionen: List[RechnungspositionCreate]
+    # Issue #459: Kategorie der Rechnung (Fallback für Positionen ohne eigene) - erkennt
+    # Reverse-Charge-Eingangsrechnungen, deren USt nicht zum Rechnungsbetrag zählt
+    kategorie_id: Optional[int] = None
     eingabemodus: str = "netto"
     rabatt_prozent: Decimal = Decimal("0")
     rabatt_betrag: Optional[Decimal] = None

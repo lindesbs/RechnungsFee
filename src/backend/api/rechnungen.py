@@ -263,6 +263,38 @@ def _klassifiziere_sonderfall(
     return sonderfall, ust03, ust04
 
 
+# Issue #459: Reverse-Charge-Fälle auf Eingangsrechnungen - der ausländische Lieferant weist keine
+# deutsche USt aus, der Rechnungs- und Zahlbetrag IST der Nettobetrag. Die USt (§13b/ig. Erwerb)
+# schuldet der Leistungsempfänger selbst; sie läuft nur nebenher für die UStVA (Vorsteuer-Anspruch
+# bzw. Journal) und darf den Rechnungsbetrag nicht erhöhen - sonst stand eine 100-€-Provision mit
+# 119 € als offener Posten da, und die Zahlungsbuchung schlug auf die 119 € noch einmal 19 % auf.
+_ADDITIVE_SONDERFAELLE = ("ig_erwerb", "13b_abs1", "13b_abs2")
+
+
+def _reverse_charge_positionen(db: Session, typ: str, positionen, rechnung_kategorie_id: int | None):
+    """Gibt (positionen, additiv) zurück: additiv[i] = True, wenn Position i auf einer
+    Eingangsrechnung zu einer §13b-/ig.-Erwerb-Kategorie gehört (Kategorie der Position, sonst der
+    Rechnung). Steht eine §13b-Position auf 0 % (so wie auf der Rechnung des Lieferanten), wird der
+    Standardsatz der Kategorie übernommen - die Steuer entsteht trotzdem. Beim ig. Erwerb bleibt
+    0 % erlaubt (eigene KZ 90). additiv ist None, wenn keine Position betroffen ist."""
+    if typ != "eingang" or not positionen:
+        return positionen, None
+    kategorien: dict[int, Kategorie | None] = {}
+    neu, additiv = [], []
+    for pos in positionen:
+        kat_id = getattr(pos, "kategorie_id", None) or rechnung_kategorie_id
+        if kat_id and kat_id not in kategorien:
+            kategorien[kat_id] = db.query(Kategorie).filter(Kategorie.id == kat_id).first()
+        kat = kategorien.get(kat_id) if kat_id else None
+        sonderfall = _klassifiziere_sonderfall(kat, False, pos.ust_satz, None, None)[0] if kat else None
+        ist_additiv = sonderfall in _ADDITIVE_SONDERFAELLE
+        if ist_additiv and sonderfall != "ig_erwerb" and not pos.ust_satz and kat.ust_satz_standard:
+            pos = pos.model_copy(update={"ust_satz": Decimal(str(kat.ust_satz_standard))})
+        neu.append(pos)
+        additiv.append(ist_additiv)
+    return neu, (additiv if any(additiv) else None)
+
+
 def _vorsteuer_kategorie_fehlt(rechnung: "Rechnung") -> bool:
     """Prüft ob für mind. eine Position keine Kategorie ermittelbar ist (Position eigene
     kategorie_id ODER rechnung.kategorie_id als Fallback) - Vorsteuer-Klassifikation
@@ -291,7 +323,13 @@ def _erzeuge_vorsteuer_ansprueche(rechnung: "Rechnung", db: Session) -> None:
         satz = int(pos.ust_satz)
         kat_id = pos.kategorie_id or rechnung.kategorie_id
         key = (kat_id, satz)
-        netto_gruppen[key] += (pos.brutto - pos.ust_betrag)
+        netto_pos = pos.brutto - pos.ust_betrag
+        # Issue #459: bei Reverse Charge ist pos.brutto bereits der Nettobetrag (USt nur nebenher).
+        # Erkennbar daran, dass die USt aus pos.brutto selbst berechnet ist - Entwürfe von vor dem
+        # Fix (brutto = netto + USt) erfüllen das nicht und laufen unverändert weiter.
+        if satz > 0 and pos.ust_betrag and pos.ust_betrag == (pos.brutto * satz / 100).quantize(Decimal("0.01"), ROUND_HALF_UP):
+            netto_pos = pos.brutto
+        netto_gruppen[key] += netto_pos
         ust_gruppen[key] += pos.ust_betrag
 
     for key, ust_betrag in ust_gruppen.items():
@@ -475,6 +513,7 @@ def _berechne_rechnung(
     rabatt_betrag: Decimal | None,
     ist_kleinunternehmer: bool,
     ist_steuerfrei_ausland: bool,
+    ust_additiv: list[bool] | None = None,
 ) -> RechnungSummen:
     """EINE Berechnung für Positionswerte + Rechnungssummen (Issue #332).
 
@@ -512,6 +551,10 @@ def _berechne_rechnung(
     Bei Differenzbesteuerung (§25a), Kleinunternehmer (§19) oder steuerfreiem Auslandsgeschäft:
     kein USt-Ausweis, Netto=Brutto, unabhängig vom eingabemodus.
 
+    ust_additiv (Issue #459, siehe _reverse_charge_positionen()): Reverse-Charge-Positionen auf
+    Eingangsrechnungen - Positionsbetrag = Netto = Zahlbetrag, die USt wird je Position
+    berechnet (für Vorsteuer-Anspruch/UStVA), fließt aber weder in brutto noch in ust_gesamt ein.
+
     Rechnungsrabatt (Kopf-Ebene) wird als Faktor auf die bereits gerundeten Positionssummen
     angewendet - bei Brutto-Richtung wird USt danach wieder als Rest (Brutto−Netto) gebildet,
     damit die Exaktheit erhalten bleibt.
@@ -521,7 +564,7 @@ def _berechne_rechnung(
     ust_sum = Decimal("0.00")
     brutto_sum = Decimal("0.00")
 
-    for pos_data in positionen_data:
+    for idx, pos_data in enumerate(positionen_data):
         ist_diff = getattr(pos_data, "differenzbesteuerung", False)
         ust_satz = Decimal("0") if (ist_kleinunternehmer or ist_diff or ist_steuerfrei_ausland) else pos_data.ust_satz
 
@@ -534,6 +577,14 @@ def _berechne_rechnung(
         # sich ein Rundungsfehler beim Aufsummieren mit der Menge (siehe Docstring oben).
         positionssumme = (einzelpreis * pos_data.menge).quantize(_Q4, ROUND_HALF_UP)
 
+        if ust_additiv and ust_additiv[idx] and ust_satz > 0:
+            # Reverse Charge (Issue #459): Betrag = Netto, USt nur nebenher (nicht in den Summen)
+            netto_pos = positionssumme.quantize(_Q2, ROUND_HALF_UP)
+            ust_pos = (positionssumme * ust_satz / 100).quantize(_Q2, ROUND_HALF_UP)
+            positionen.append(_PositionsErgebnis(ust_satz, ust_pos, netto_pos, netto_pos))
+            netto_sum += netto_pos
+            brutto_sum += netto_pos
+            continue
         if ust_satz == 0:
             # §25a / Kleinunternehmer / steuerfreies Ausland: kein USt-Ausweis
             netto_pos = positionssumme.quantize(_Q2, ROUND_HALF_UP)
@@ -1358,9 +1409,10 @@ def rechnung_vorschau(data: RechnungVorschauRequest, db: Session = Depends(get_d
         data.ist_reverse_charge or data.ist_eu_lieferung
         or data.ist_drittland_leistung or data.ist_ausfuhrlieferung
     )
+    positionen, ust_additiv = _reverse_charge_positionen(db, data.typ, data.positionen, data.kategorie_id)
     summen = _berechne_rechnung(
-        data.positionen, data.eingabemodus, data.rabatt_prozent, data.rabatt_betrag,
-        ist_kleinunternehmer, ist_steuerfrei_ausland,
+        positionen, data.eingabemodus, data.rabatt_prozent, data.rabatt_betrag,
+        ist_kleinunternehmer, ist_steuerfrei_ausland, ust_additiv,
     )
     return RechnungVorschauResponse(
         positionen=[
@@ -1528,11 +1580,12 @@ def _create_rechnung(data: RechnungCreate, db: Session, import_quelle: str | Non
         data.ist_reverse_charge or data.ist_eu_lieferung
         or data.ist_drittland_leistung or data.ist_ausfuhrlieferung
     )
+    rc_positionen, ust_additiv = _reverse_charge_positionen(db, data.typ, data.positionen, data.kategorie_id)  # Issue #459
     override_summen = None
     if data.netto_gesamt_override is not None:
         override_summen = _berechne_rechnung(
-            data.positionen, data.eingabemodus, Decimal("0"), None,
-            ist_kleinunternehmer, ist_steuerfrei_ausland,
+            rc_positionen, data.eingabemodus, Decimal("0"), None,
+            ist_kleinunternehmer, ist_steuerfrei_ausland, ust_additiv,
         )
         if not _overrides_plausibel(data, override_summen):
             # Issue #450: widersprüchliche PDF-Kopfsummen nicht still übernehmen - dann gelten
@@ -1556,8 +1609,8 @@ def _create_rechnung(data: RechnungCreate, db: Session, import_quelle: str | Non
         rechnung.brutto_gesamt = (data.brutto_gesamt_override or rechnung.netto_gesamt + rechnung.ust_gesamt).quantize(Q, ROUND_HALF_UP)
     else:
         summen = _berechne_rechnung(
-            data.positionen, data.eingabemodus, rechnung.rabatt_prozent, rechnung.rabatt_betrag,
-            ist_kleinunternehmer, ist_steuerfrei_ausland,
+            rc_positionen, data.eingabemodus, rechnung.rabatt_prozent, rechnung.rabatt_betrag,
+            ist_kleinunternehmer, ist_steuerfrei_ausland, ust_additiv,
         )
         rechnung.netto_gesamt  = summen.netto_gesamt
         rechnung.ust_gesamt    = summen.ust_gesamt
@@ -1675,9 +1728,12 @@ def update_rechnung(rechnung_id: int, data: RechnungUpdate, db: Session = Depend
 
         rechnung.rabatt_prozent = getattr(data, "rabatt_prozent", Decimal("0")) or Decimal("0")
         rechnung.rabatt_betrag  = getattr(data, "rabatt_betrag", None) or None
+        rc_positionen, ust_additiv = _reverse_charge_positionen(  # Issue #459
+            db, rechnung.typ, data.positionen, getattr(data, "kategorie_id", None) or rechnung.kategorie_id,
+        )
         summen = _berechne_rechnung(
-            data.positionen, rechnung.eingabemodus, rechnung.rabatt_prozent, rechnung.rabatt_betrag,
-            ist_kleinunternehmer, ist_steuerfrei_ausland,
+            rc_positionen, rechnung.eingabemodus, rechnung.rabatt_prozent, rechnung.rabatt_betrag,
+            ist_kleinunternehmer, ist_steuerfrei_ausland, ust_additiv,
         )
         rechnung.netto_gesamt  = summen.netto_gesamt
         rechnung.ust_gesamt    = summen.ust_gesamt

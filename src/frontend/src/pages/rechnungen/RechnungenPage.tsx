@@ -3176,7 +3176,10 @@ const kundeIdNum = partnerId ? parseInt(partnerId) : null
       ust_satz: p.ust_satz || '0',
       differenzbesteuerung: p.differenzbesteuerung ?? false,
       rabatt_prozent: parseFloat((p.rabatt_prozent ?? '').replace(',', '.')) || undefined,
+      // Issue #459: Kategorie mitschicken - bei §13b/ig. Erwerb zählt die USt nicht zum Rechnungsbetrag
+      kategorie_id: p.kategorie_id ? parseInt(p.kategorie_id) : undefined,
     })),
+    kategorie_id: kategorieId ? parseInt(kategorieId) : undefined,
     eingabemodus: eingabeModus,
     rabatt_prozent: rechnungRabattNum > 0 && rechnungRabattModus === 'prozent' ? rechnungRabattNum : undefined,
     rabatt_betrag: rechnungRabattNum > 0 && rechnungRabattModus === 'betrag' ? rechnungRabattNum : undefined,
