@@ -157,3 +157,44 @@ def test_zm_csv_export_mit_sonstiger_leistung(db):
         return b"".join([c async for c in antwort.body_iterator])
     inhalt = asyncio.run(_lesen()).decode("utf-8")
     assert "FR40303265045,1000,S" in inhalt.splitlines()
+
+
+# ---------------------------------------------------------------------------
+# Issue #457: Ausfuhrlieferungen in KZ 43 (nicht KZ 87)
+# ---------------------------------------------------------------------------
+
+def _ausfuhr(db, netto="1500.00") -> int:
+    resp = create_rechnung(RechnungCreate(
+        typ="ausgang", datum=date(2026, 8, 1), partner_freitext="Kunde AG, Schweiz", ist_ausfuhrlieferung=True,
+        positionen=[RechnungspositionCreate(beschreibung="Ware", netto=Decimal(netto), ust_satz=Decimal("0"))],
+    ), db)
+    finalisiere_rechnung(resp.id, db)
+    zahlung_bar_erstellen(resp.id, BarZahlungCreate(datum=date(2026, 8, 20), zahlungsart="Bank"), db)
+    return resp.id
+
+
+def test_ausfuhrlieferung_in_kz43(db):
+    _ausfuhr(db)
+    kz, posten = _berechne_kz(date(2026, 7, 1), date(2026, 9, 30), db)
+    assert kz["kz_43"] == Decimal("1500.00")
+    assert kz["kz_87"] == Decimal("0.00")
+    assert kz["kz_41"] == Decimal("0.00")
+    assert kz["kz_81"] == Decimal("0.00")
+    assert len(posten["kz_43"]) == 1
+    assert zm_berechnen("2026-Q3", db=db).positionen == []  # Drittland gehört nicht in die ZM
+
+
+def test_storno_ausfuhrlieferung_hebt_kz43_auf(db):
+    rechnung_id = _ausfuhr(db)
+    storno_rechnung(rechnung_id, StornoRequest(grund="Testkorrektur"), db)
+    kz, _ = _berechne_kz(date(2026, 7, 1), date(2026, 9, 30), db)
+    assert kz["kz_43"] == Decimal("0.00")
+
+
+def test_kz43_im_elster_xml_und_kz87_als_null_prozent():
+    from api.ustva import KZ_META
+    from utils.elster import KZ_BEMESSUNGSGRUNDLAGE
+    meta = {nr: (bez, auto) for _, nr, bez, _, auto in KZ_META}
+    assert "Ausfuhr" in meta["43"][0] and meta["43"][1] is True
+    assert "0 %" in meta["87"][0] and "Ausfuhr" not in meta["87"][0] and meta["87"][1] is False
+    assert "43" in KZ_BEMESSUNGSGRUNDLAGE

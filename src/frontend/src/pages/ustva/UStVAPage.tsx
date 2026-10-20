@@ -17,8 +17,10 @@ type KZMeta = [string, string, string, boolean, boolean]
 const KZ_META: KZMeta[] = [
   ['A. Steuerpflichtige Ausgangsumsätze', '81', 'Umsätze 19 % – Bemessungsgrundlage', false, true],
   ['', '86', 'Umsätze 7 % – Bemessungsgrundlage', false, true],
+  // Issue #457: KZ 87 laut Vordruck = steuerpflichtige Umsätze zu 0 % (nicht Ausfuhr) – manuell
+  ['', '87', 'Umsätze zum Steuersatz von 0 % (§12 Abs. 3 UStG, z. B. Photovoltaik)', false, false],
   ['B. Steuerfreie Umsätze mit Vorsteuerabzug', '41', 'Innergemeinschaftliche Lieferungen (§4 Nr. 1b) an Abnehmer mit USt-IdNr.', false, true],
-  ['', '87', 'Weitere steuerfreie Umsätze mit Vorsteuerabzug (Ausfuhr, §4 Nr. 2–7 UStG)', false, false],
+  ['', '43', 'Weitere steuerfreie Umsätze mit Vorsteuerabzug (z. B. Ausfuhrlieferungen, §4 Nr. 1a i. V. m. §6 UStG)', false, true],
   ['Nicht im Inland steuerbare Umsätze', '21', 'Nicht steuerbare sonstige Leistungen im übrigen Gemeinschaftsgebiet (§3a Abs. 2 UStG)', false, true],
   ['', '45', 'Übrige nicht im Inland steuerbare Umsätze (u. a. §3a Abs. 2 UStG Drittland)', false, true],
   ['C. Innergemeinschaftliche Erwerbe', '89', 'Steuerpflichtige Erwerbe 19 % – Bemessungsgrundlage', false, true],
@@ -249,13 +251,17 @@ export function UStVAPage() {
     const gruppen: { abschnitt: string; zeilen: KZMeta[] }[] = []
     let aktGruppe: { abschnitt: string; zeilen: KZMeta[] } | null = null
 
+    // Abschnitt aus KZ_META mitführen, auch über KZs ohne Wert hinweg - sonst landet z. B. KZ 43
+    // unter „A.“, wenn im Zeitraum nur KZ 81 und KZ 43 belegt sind
+    let metaAbschnitt = ''
     for (const meta of KZ_META) {
       const [abschnitt, nr] = meta
+      if (abschnitt) metaAbschnitt = abschnitt
       const wert = parseFloat(kzWert(nr) || '0')
       if (wert === 0) continue
 
-      const effAbschnitt: string = abschnitt || aktGruppe?.abschnitt || ''
-      if (!aktGruppe || (abschnitt && abschnitt !== aktGruppe.abschnitt)) {
+      const effAbschnitt: string = metaAbschnitt
+      if (!aktGruppe || effAbschnitt !== aktGruppe.abschnitt) {
         aktGruppe = { abschnitt: effAbschnitt, zeilen: [] }
         gruppen.push(aktGruppe)
       }
@@ -377,7 +383,7 @@ export function UStVAPage() {
               {/* Manuelle Felder – immer sichtbar wenn EU-Handel möglich */}
               <details className="mb-4">
                 <summary className="cursor-pointer text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 mb-2 select-none">
-                  Manuelle Felder (EU-Lieferungen, Ausfuhr) ▸
+                  Manuelle Felder (Umsätze 0 %) ▸
                 </summary>
                 <div className="mt-2 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700">
                   {KZ_META.filter(([,,, , auto]) => !auto).map(([, nr, bezeichnung]) => (

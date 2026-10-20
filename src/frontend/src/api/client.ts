@@ -2001,8 +2001,9 @@ export type UStVAErgebnis = {
   // A – Ausgangsumsätze
   kz_81: string; kz_83: string
   kz_86: string; kz_88: string
-  // B – steuerfreie Umsätze (manuell)
-  kz_41: string; kz_87: string
+  kz_87: string  // 0 % (manuell)
+  // B – steuerfreie Umsätze mit Vorsteuerabzug
+  kz_41: string; kz_43: string
   // Nicht im Inland steuerbare Umsätze
   kz_21: string; kz_45: string
   // C – ig. Erwerb
@@ -2073,7 +2074,7 @@ export type JahresUStVAErgebnis = {
   bis: string
   ist_kleinunternehmer: boolean
   kz_81: string; kz_83: string; kz_86: string; kz_88: string
-  kz_41: string; kz_87: string; kz_21: string; kz_45: string
+  kz_41: string; kz_43: string; kz_87: string; kz_21: string; kz_45: string
   kz_89: string; kz_93: string
   kz_90: string; kz_95: string; kz_98: string
   kz_46: string; kz_47: string; kz_84: string; kz_85: string

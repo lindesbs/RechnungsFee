@@ -25,8 +25,10 @@ gibt es zusätzlich eine Steuer-Kennzahl. kz_83/kz_88 (Steuer 19%/7% Inland) sin
 KEINE echten Kennzahlen, sondern nur interne Hilfsgrößen für die Zahllast-Berechnung
 (Issue #272).
 
-KZ 41 (EU-Lieferungen steuerfreie Einnahmen) und KZ 87 (Ausfuhr etc.)
-können nicht sicher aus dem Journal abgeleitet werden – manuelle Eingabe.
+KZ 41 (ig. Lieferungen) und KZ 43 (Ausfuhrlieferungen) werden über die verknüpfte
+Ausgangsrechnung erkannt (Issue #458/#457). KZ 87 (steuerpflichtige Umsätze zu 0 %,
+§12 Abs. 3 UStG, z. B. Photovoltaik) bleibt manuell – 0 % kommt in RechnungsFee auch bei
+Kleinunternehmern und Auslandsfällen vor und ist daher kein eindeutiges Merkmal.
 """
 
 import calendar
@@ -62,11 +64,14 @@ KZ_META = [
     ("A. Steuerpflichtige Ausgangsumsätze", "81",
      "Umsätze 19 % – Bemessungsgrundlage", False, True),
     ("", "86", "Umsätze 7 % – Bemessungsgrundlage", False, True),
+    # Issue #457: KZ 87 laut Vordruck = steuerpflichtige Umsätze zu 0 %, nicht Ausfuhr
+    ("", "87",
+     "Umsätze zum Steuersatz von 0 % (§12 Abs. 3 UStG, z. B. Photovoltaik)", False, False),
 
     ("B. Steuerfreie Umsätze mit Vorsteuerabzug", "41",
-     "Innergemeinschaftliche Lieferungen (§4 Nr. 1b) an Abnehmer mit USt-IdNr.", False, False),
-    ("", "87",
-     "Weitere steuerfreie Umsätze mit Vorsteuerabzug (Ausfuhr, §4 Nr. 2–7 UStG)", False, False),
+     "Innergemeinschaftliche Lieferungen (§4 Nr. 1b) an Abnehmer mit USt-IdNr.", False, True),
+    ("", "43",
+     "Weitere steuerfreie Umsätze mit Vorsteuerabzug (z. B. Ausfuhrlieferungen, §4 Nr. 1a i. V. m. §6 UStG)", False, True),
 
     ("Nicht im Inland steuerbare Umsätze", "21",
      "Nicht steuerbare sonstige Leistungen im übrigen Gemeinschaftsgebiet (§3a Abs. 2 UStG)", False, True),
@@ -272,6 +277,12 @@ def _berechne_kz(von: date, bis: date, db: Session) -> tuple[dict[str, Decimal],
         r[0] for r in db.query(Rechnung.id)
         .filter(Rechnung.typ == "ausgang", Rechnung.ist_eu_lieferung == True).all()  # noqa: E712
     }
+    # KZ 43 (Issue #457): Ausfuhrlieferungen (§4 Nr. 1a i. V. m. §6 UStG, Flag seit #323) waren
+    # in der UStVA bisher gar nicht sichtbar - nur ein falsch beschriftetes manuelles Feld 87.
+    _ausfuhr_rechnung_ids = {
+        r[0] for r in db.query(Rechnung.id)
+        .filter(Rechnung.typ == "ausgang", Rechnung.ist_ausfuhrlieferung == True).all()  # noqa: E712
+    }
 
     # Lookup-Cache: Original-id (gruppe_id) → marge_25a_brutto (für Storno-Fallback bei alten Einträgen)
     _marge_cache: dict[int, Decimal | None] = {}
@@ -368,6 +379,14 @@ def _berechne_kz(von: date, bis: date, db: Session) -> tuple[dict[str, Decimal],
         elif e.art == "Ausgabe" and e.zahlungsart != "Skonto" and e.rechnung_id in _ig_lieferung_rechnung_ids:
             kz["kz_41"] -= e.netto_betrag
             posten["kz_41"].append({**quelle, "betrag": -e.netto_betrag})
+
+        # KZ 43 – Ausfuhrlieferungen (Issue #457), gleiche Logik wie KZ 41 über die Rechnung
+        if e.art == "Einnahme" and e.rechnung_id in _ausfuhr_rechnung_ids:
+            kz["kz_43"] += e.netto_betrag
+            posten["kz_43"].append({**quelle, "betrag": e.netto_betrag})
+        elif e.art == "Ausgabe" and e.zahlungsart != "Skonto" and e.rechnung_id in _ausfuhr_rechnung_ids:
+            kz["kz_43"] -= e.netto_betrag
+            posten["kz_43"].append({**quelle, "betrag": -e.netto_betrag})
 
         # KZ 21/45 (Issue #372) – nicht steuerbare Auslands-Dienstleistungen. Erkennung über
         # rechnung_id statt Konto/steuerbefreiung_grund, da diese Buchungen kein eigenes
@@ -617,12 +636,14 @@ def _generate_pdf(zeitraum: str, kz: dict, unt: Unternehmen, gerundet: dict, zah
 
     # Nur Zeilen mit Wert ≠ 0 rendern, Abschnitte bei Bedarf
     letzter_abschnitt = None
+    meta_abschnitt = ""  # Abschnitt aus KZ_META, auch über KZs ohne Wert hinweg (Issue #457)
     for (abschnitt, kz_nr, bezeichnung, ist_steuer, _auto) in KZ_META:
+        meta_abschnitt = abschnitt or meta_abschnitt
         key = f"kz_{kz_nr}"
         wert = kz.get(key, ZERO)
         if wert == ZERO:
             continue
-        eff_abschnitt = abschnitt if abschnitt else letzter_abschnitt
+        eff_abschnitt = meta_abschnitt
         if eff_abschnitt != letzter_abschnitt:
             if letzter_abschnitt is not None:
                 pdf.ln(2)
@@ -695,9 +716,10 @@ class UStVAErgebnis(BaseModel):
     kz_83: Decimal = ZERO
     kz_86: Decimal = ZERO
     kz_88: Decimal = ZERO
-    # B – Steuerfreie Umsätze (manuell)
+    kz_87: Decimal = ZERO   # 0 % (manuell, Issue #457)
+    # B – Steuerfreie Umsätze mit Vorsteuerabzug
     kz_41: Decimal = ZERO
-    kz_87: Decimal = ZERO
+    kz_43: Decimal = ZERO   # Ausfuhrlieferungen (Issue #457)
     # Nicht im Inland steuerbare Umsätze (Issue #372)
     kz_21: Decimal = ZERO
     kz_45: Decimal = ZERO
@@ -744,6 +766,7 @@ class UStVASpeichernRequest(BaseModel):
     kz_86: Decimal = ZERO
     kz_88: Decimal = ZERO
     kz_41: Decimal = ZERO
+    kz_43: Decimal = ZERO
     kz_87: Decimal = ZERO
     kz_21: Decimal = ZERO
     kz_45: Decimal = ZERO
@@ -936,7 +959,7 @@ class JahresUStVAErgebnis(BaseModel):
     # Reguläre KZs – identisch mit den Voranmeldungs-KZs, Jahressumme aus Journal
     kz_81: Decimal = ZERO; kz_83: Decimal = ZERO
     kz_86: Decimal = ZERO; kz_88: Decimal = ZERO
-    kz_41: Decimal = ZERO; kz_87: Decimal = ZERO
+    kz_41: Decimal = ZERO; kz_43: Decimal = ZERO; kz_87: Decimal = ZERO
     kz_21: Decimal = ZERO; kz_45: Decimal = ZERO
     kz_89: Decimal = ZERO; kz_93: Decimal = ZERO
     kz_90: Decimal = ZERO; kz_95: Decimal = ZERO; kz_98: Decimal = ZERO
@@ -1084,12 +1107,14 @@ def _generate_pdf_jahres(jahr: int, ergebnis: JahresUStVAErgebnis, unt: Unterneh
     else:
         # Reguläre KZ-Tabelle (nur Zeilen ≠ 0)
         letzter_abschnitt = None
+        meta_abschnitt = ""  # wie oben (Issue #457)
         for (abschnitt, kz_nr, bezeichnung, ist_steuer, _auto) in KZ_META:
+            meta_abschnitt = abschnitt or meta_abschnitt
             key = f"kz_{kz_nr}"
             wert: Decimal = getattr(ergebnis, key, ZERO)
             if wert == ZERO:
                 continue
-            eff = abschnitt if abschnitt else letzter_abschnitt
+            eff = meta_abschnitt
             if eff != letzter_abschnitt:
                 if letzter_abschnitt is not None:
                     pdf.ln(2)
@@ -1214,7 +1239,7 @@ def jahresumsatzsteuer(
         jahr=jahr, von=von, bis=bis, ist_kleinunternehmer=ist_ku,
         kz_81=kz.get("kz_81", ZERO), kz_83=kz.get("kz_83", ZERO),
         kz_86=kz.get("kz_86", ZERO), kz_88=kz.get("kz_88", ZERO),
-        kz_41=kz.get("kz_41", ZERO), kz_87=kz.get("kz_87", ZERO),
+        kz_41=kz.get("kz_41", ZERO), kz_43=kz.get("kz_43", ZERO), kz_87=kz.get("kz_87", ZERO),
         kz_21=kz.get("kz_21", ZERO), kz_45=kz.get("kz_45", ZERO),
         kz_89=kz.get("kz_89", ZERO), kz_93=kz.get("kz_93", ZERO),
         kz_90=kz.get("kz_90", ZERO), kz_95=kz.get("kz_95", ZERO), kz_98=kz.get("kz_98", ZERO),
@@ -1269,7 +1294,7 @@ def jahresumsatzsteuer_pdf(
         jahr=jahr, von=von, bis=bis, ist_kleinunternehmer=ist_ku,
         kz_81=kz.get("kz_81", ZERO), kz_83=kz.get("kz_83", ZERO),
         kz_86=kz.get("kz_86", ZERO), kz_88=kz.get("kz_88", ZERO),
-        kz_41=kz.get("kz_41", ZERO), kz_87=kz.get("kz_87", ZERO),
+        kz_41=kz.get("kz_41", ZERO), kz_43=kz.get("kz_43", ZERO), kz_87=kz.get("kz_87", ZERO),
         kz_21=kz.get("kz_21", ZERO), kz_45=kz.get("kz_45", ZERO),
         kz_89=kz.get("kz_89", ZERO), kz_93=kz.get("kz_93", ZERO),
         kz_90=kz.get("kz_90", ZERO), kz_95=kz.get("kz_95", ZERO), kz_98=kz.get("kz_98", ZERO),
