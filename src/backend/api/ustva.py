@@ -263,6 +263,14 @@ def _berechne_kz(von: date, bis: date, db: Session) -> tuple[dict[str, Decimal],
     _drittland_dl_rechnung_ids = {
         r[0] for r in db.query(Rechnung.id).filter(Rechnung.ist_drittland_leistung == True).all()  # noqa: E712
     }
+    # KZ 41 (Issue #458): die Zahlungsbuchung einer Rechnung setzt steuerbefreiung_grund nie auf
+    # "§4 Nr. 1b UStG" (nur freie Journalbuchungen tun das, api/journal.py) - ig. Lieferungen aus
+    # Rechnungen fehlten dadurch in KZ 41, während die ZM sie (nur über das Konto) korrekt zählte.
+    # Erkennung deshalb zusätzlich über die Rechnung, analog zu KZ 21.
+    _ig_lieferung_rechnung_ids = {
+        r[0] for r in db.query(Rechnung.id)
+        .filter(Rechnung.typ == "ausgang", Rechnung.ist_eu_lieferung == True).all()  # noqa: E712
+    }
 
     # Lookup-Cache: Original-id (gruppe_id) → marge_25a_brutto (für Storno-Fallback bei alten Einträgen)
     _marge_cache: dict[int, Decimal | None] = {}
@@ -346,11 +354,19 @@ def _berechne_kz(von: date, bis: date, db: Session) -> tuple[dict[str, Decimal],
                 posten[mapping[1]].append({**quelle, "betrag": ust_delta})
 
         # KZ 41 – ig. Lieferungen: 0% USt, Erkennung via konto_skr03 8125/3125
-        if (e.art == "Einnahme"
-                and (e.konto_skr03 in ("8125",) or e.konto_skr04 in ("3125",))
-                and e.steuerbefreiung_grund == "§4 Nr. 1b UStG"):
+        # bzw. über die verknüpfte Rechnung mit ist_eu_lieferung (Issue #458)
+        if e.art == "Einnahme" and (
+            e.rechnung_id in _ig_lieferung_rechnung_ids
+            or ((e.konto_skr03 in ("8125",) or e.konto_skr04 in ("3125",))
+                and e.steuerbefreiung_grund == "§4 Nr. 1b UStG")
+        ):
             kz["kz_41"] += e.netto_betrag
             posten["kz_41"].append({**quelle, "betrag": e.netto_betrag})
+        # Storno/Gutschrift-Zahlung einer ig.-Lieferungs-Rechnung mindert KZ 41 (Skonto nicht,
+        # der Zahlungseingang enthält den reduzierten Betrag bereits - wie bei KZ 21 unten)
+        elif e.art == "Ausgabe" and e.zahlungsart != "Skonto" and e.rechnung_id in _ig_lieferung_rechnung_ids:
+            kz["kz_41"] -= e.netto_betrag
+            posten["kz_41"].append({**quelle, "betrag": -e.netto_betrag})
 
         # KZ 21/45 (Issue #372) – nicht steuerbare Auslands-Dienstleistungen. Erkennung über
         # rechnung_id statt Konto/steuerbefreiung_grund, da diese Buchungen kein eigenes

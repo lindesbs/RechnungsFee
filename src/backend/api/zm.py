@@ -96,6 +96,11 @@ def _eu_dl_rechnungen():
     return select(Rechnung.id).where(Rechnung.typ == "ausgang", Rechnung.ist_reverse_charge == True)  # noqa: E712
 
 
+def _ig_lieferung_rechnungen():
+    """Ausgangsrechnungen mit ig. Lieferung (§4 Nr. 1b UStG) - wie UStVA KZ 41 (Issue #458)."""
+    return select(Rechnung.id).where(Rechnung.typ == "ausgang", Rechnung.ist_eu_lieferung == True)  # noqa: E712
+
+
 def _ig_eintraege(von: date, bis: date, db: Session) -> list[_IgBuchung]:
     """Alle ZM-relevanten Buchungen im Zeitraum.
 
@@ -137,18 +142,22 @@ def _ig_eintraege(von: date, bis: date, db: Session) -> list[_IgBuchung]:
     for storno_e, orig_e in stornos:
         ergebnis.append(_IgBuchung(-(storno_e.netto_betrag or ZERO), "L", orig_e.rechnung_id))
 
-    dienstleistungen = db.query(Journaleintrag).filter(
+    # Über die Rechnung erkannt: sonstige Leistungen (S) und ig. Lieferungen (L) aus Rechnungen,
+    # deren Zahlungsbuchung auf einer anderen Kategorie als 8125/3125 liegt (Issue #458)
+    lieferung_ids = {r[0] for r in db.execute(_ig_lieferung_rechnungen()).all()}
+    ueber_rechnung = db.query(Journaleintrag).filter(
         Journaleintrag.datum >= von, Journaleintrag.datum <= bis,
-        Journaleintrag.rechnung_id.in_(_eu_dl_rechnungen()),
+        Journaleintrag.rechnung_id.in_(_eu_dl_rechnungen()) | Journaleintrag.rechnung_id.in_(_ig_lieferung_rechnungen()),
     ).all()
-    for e in dienstleistungen:
-        # schon als L gezählt (in Python statt per SQL-NOT: Konten sind hier meist NULL)
+    for e in ueber_rechnung:
+        # schon oben als L über das Konto gezählt (in Python statt per SQL-NOT: Konten sind hier oft NULL)
         if e.konto_skr03 == "8125" or e.konto_skr04 == "3125":
             continue
+        kz = "L" if e.rechnung_id in lieferung_ids else "S"
         if e.art == "Einnahme":
-            ergebnis.append(_IgBuchung(e.netto_betrag or ZERO, "S", e.rechnung_id))
+            ergebnis.append(_IgBuchung(e.netto_betrag or ZERO, kz, e.rechnung_id))
         elif e.art == "Ausgabe" and e.zahlungsart != "Skonto":
-            ergebnis.append(_IgBuchung(-(e.netto_betrag or ZERO), "S", e.rechnung_id))
+            ergebnis.append(_IgBuchung(-(e.netto_betrag or ZERO), kz, e.rechnung_id))
 
     return ergebnis
 
@@ -190,7 +199,9 @@ def _hat_ig_eintraege_gesamt(db: Session) -> bool:
     """True wenn überhaupt je ig-Buchungen existieren (für Sidebar-Sichtbarkeit)."""
     return db.query(Journaleintrag).filter(
         Journaleintrag.art == "Einnahme",
-        _ig_lieferung_filter(Journaleintrag) | Journaleintrag.rechnung_id.in_(_eu_dl_rechnungen()),
+        _ig_lieferung_filter(Journaleintrag)
+        | Journaleintrag.rechnung_id.in_(_eu_dl_rechnungen())
+        | Journaleintrag.rechnung_id.in_(_ig_lieferung_rechnungen()),
     ).limit(1).count() > 0
 
 

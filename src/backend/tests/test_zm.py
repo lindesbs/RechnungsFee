@@ -95,6 +95,52 @@ def test_szenario_aus_issue(db):
     assert positionen[0].kennzeichen == "S"
 
 
+# ---------------------------------------------------------------------------
+# Issue #458: ig. Lieferungen aus Rechnungen fehlten in UStVA KZ 41
+# ---------------------------------------------------------------------------
+
+def _ig_lieferung(db, mit_kategorie: bool, netto="2000.00") -> int:
+    kat_id = None
+    if mit_kategorie:
+        kat = Kategorie(name="Innergemeinschaftliche Lieferungen", kontenart="Erlös",
+                        konto_skr03="8125", konto_skr04="3125", ust_satz_standard=0)
+        db.add(kat)
+        db.commit()
+        kat_id = kat.id
+    kunde = db.query(Kunde).first()
+    resp = create_rechnung(RechnungCreate(
+        typ="ausgang", datum=date(2026, 8, 1), kunde_id=kunde.id, ist_eu_lieferung=True,
+        positionen=[RechnungspositionCreate(beschreibung="Ware", netto=Decimal(netto), ust_satz=Decimal("0"),
+                                            kategorie_id=kat_id)],
+    ), db)
+    finalisiere_rechnung(resp.id, db)
+    zahlung_bar_erstellen(resp.id, BarZahlungCreate(datum=date(2026, 8, 20), zahlungsart="Bank"), db)
+    return resp.id
+
+
+@pytest.mark.parametrize("mit_kategorie", [True, False])
+def test_ig_lieferung_aus_rechnung_in_kz41_und_zm(db, mit_kategorie):
+    _ig_lieferung(db, mit_kategorie)
+    kz, posten = _berechne_kz(date(2026, 7, 1), date(2026, 9, 30), db)
+    assert kz["kz_41"] == Decimal("2000.00")
+    assert kz["kz_81"] == Decimal("0.00")
+    assert len(posten["kz_41"]) == 1
+    zm = zm_berechnen("2026-Q3", db=db)
+    assert [(p.ust_idnr, p.kennzeichen, p.betrag) for p in zm.positionen] == [
+        ("FR40303265045", "L", Decimal("2000.00")),
+    ]
+    assert zm.gesamt == kz["kz_41"]
+
+
+@pytest.mark.parametrize("mit_kategorie", [True, False])
+def test_storno_ig_lieferung_hebt_kz41_und_zm_auf(db, mit_kategorie):
+    rechnung_id = _ig_lieferung(db, mit_kategorie)
+    storno_rechnung(rechnung_id, StornoRequest(grund="Testkorrektur"), db)
+    kz, _ = _berechne_kz(date(2026, 7, 1), date(2026, 9, 30), db)
+    assert kz["kz_41"] == Decimal("0.00")
+    assert zm_berechnen("2026-Q3", db=db).positionen == []
+
+
 def test_stornierte_eu_dienstleistung_hebt_sich_auf(db):
     rechnung_id = _eu_dienstleistung(db)
     storno_rechnung(rechnung_id, StornoRequest(grund="Testkorrektur"), db)
