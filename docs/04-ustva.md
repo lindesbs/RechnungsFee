@@ -113,13 +113,15 @@ bereits konvertierte 13-stellige Nummern werden durchgereicht).
   Steuernummer; ELSTER berechnete die Steuer aus den vollen
   Euro-Bemessungsgrundlagen selbst), die ZM-CSV wurde als Meldezeile
   (USt-IdNr., Summe, Art der Leistung „L“) übernommen. Der Test verifiziert
-  Format und Übernahme, nicht die Berechnung – die ZM-Art „S“ ist wegen #456
-  noch nicht upload-getestet.
-- Die Exporte übernehmen die berechneten Werte unverändert, also auch zwei
-  bekannte Rechenfehler, die Seite und PDF genauso betreffen:
-  #456 (ZM: EU-B2B-Dienstleistungen fehlen, stornierte §13b-Einkäufe
-  erscheinen als Position – letzteres bricht den CSV-Export mit 422 ab) und
-  #458 (ig. Lieferungen aus Rechnungszahlungen fehlen in KZ 41).
+  Format und Übernahme, nicht die Berechnung – die ZM-Art „S“ (seit #456
+  korrekt berechnet) ist noch nicht upload-getestet.
+- Die Exporte übernehmen die berechneten Werte unverändert. Die beiden zuvor
+  bekannten Rechenfehler #456 (ZM: EU-B2B-Dienstleistungen fehlten) und #458
+  (ig. Lieferungen aus Rechnungen fehlten in KZ 41) sind behoben; ZM und UStVA
+  nutzen dieselbe Quelle (ZM-Summe S = KZ 21, L = KZ 41).
+- Offen: ZM und KZ 21/41 werden nach dem Zahlungsdatum zugeordnet; für die ZM
+  ist nach §18a Abs. 8 UStG vermutlich der Leistungs-/Rechnungsmonat maßgeblich
+  (noch zu prüfen).
 - Kein `<Unternehmer>`-Block (optional; ELSTER erlaubt dort als Hausnummer
   nur Ziffern) – Name und Anschrift stehen im Pflichtblock `<DatenLieferant>`;
   fehlen sie in den Stammdaten, antwortet der Endpunkt mit 422.

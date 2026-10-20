@@ -145,3 +145,15 @@ def test_stornierte_eu_dienstleistung_hebt_sich_auf(db):
     rechnung_id = _eu_dienstleistung(db)
     storno_rechnung(rechnung_id, StornoRequest(grund="Testkorrektur"), db)
     assert zm_berechnen("2026-Q2", db=db).positionen == []
+
+
+def test_zm_csv_export_mit_sonstiger_leistung(db):
+    """Issue #456 + #360: Kennzeichen S aus zm_berechnen() muss im ELSTER-CSV ankommen."""
+    from api.zm import zm_csv
+    _eu_dienstleistung(db)
+    antwort = zm_csv("2026-Q2", db=db)
+    import asyncio
+    async def _lesen():
+        return b"".join([c async for c in antwort.body_iterator])
+    inhalt = asyncio.run(_lesen()).decode("utf-8")
+    assert "FR40303265045,1000,S" in inhalt.splitlines()

@@ -1,4 +1,4 @@
-"""ELSTER-Export-Utilities (Stufe 1: Datei-Upload in Mein ELSTER, kein ERiC).
+r"""ELSTER-Export-Utilities (Stufe 1: Datei-Upload in Mein ELSTER, kein ERiC).
 
 Enthält:
 - steuernummer_elster13(): Umrechnung der Landes-Steuernummer ins 13-stellige
@@ -233,7 +233,8 @@ def build_ustva_xml(
 # Excel-Version 3.2.1, UTF-8, Komma-getrennt, Summe als ganze Euro-Zahl.
 # RechnungsFee-Kennzeichen → ELSTER-Code: intern "D" (§13b-Dienstleistung)
 # ist bei ELSTER "S" (sonstige Leistung); "D" ist dort das Dreiecksgeschäft.
-_ZM_KENNZEICHEN = {"L": "L", "D": "S"}
+# Seit Issue #456 liefert api/zm.py direkt "S"; "D" bleibt als Altwert erlaubt.
+_ZM_KENNZEICHEN = {"L": "L", "S": "S", "D": "S"}
 _UST_IDNR_RE = re.compile(r"^[A-Z]{2}[0-9A-Z+*]{5,12}$")
 
 
