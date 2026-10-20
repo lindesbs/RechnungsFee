@@ -192,7 +192,9 @@ export function UStVAPage() {
     queryFn: () => berechneUStVA(zeitraum),
     // Issue #430: zusätzlich zu Kleinunternehmern auch bei Finanzamt-Befreiung (§18 Abs. 2
     // Satz 3 UStG, voranmeldungsrhythmus="keine") die Berechnung nicht unnötig anstoßen.
-    enabled: !unt?.ist_kleinunternehmer && unt?.voranmeldungsrhythmus !== 'keine',
+    // Issue #459: Kleinunternehmer trotzdem berechnen lassen - das Backend meldet für sie nur
+    // §13b/ig. Erwerb und sonst "befreit".
+    enabled: !!unt && (!!unt.ist_kleinunternehmer || unt.voranmeldungsrhythmus !== 'keine'),
   })
 
   const speichernMut = useMutation({
@@ -380,8 +382,8 @@ export function UStVAPage() {
                 </Abschnitt>
               ))}
 
-              {/* Manuelle Felder – immer sichtbar wenn EU-Handel möglich */}
-              <details className="mb-4">
+              {/* Manuelle Felder – nicht für Kleinunternehmer (melden nur §13b/ig. Erwerb, Issue #459) */}
+              {!ergebnis.ist_kleinunternehmer && <details className="mb-4">
                 <summary className="cursor-pointer text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 mb-2 select-none">
                   Manuelle Felder (Umsätze 0 %) ▸
                 </summary>
@@ -402,7 +404,7 @@ export function UStVAPage() {
                     </div>
                   ))}
                 </div>
-              </details>
+              </details>}
 
               {/* Zahllast */}
               {zahllast !== null && (

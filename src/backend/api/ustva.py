@@ -474,6 +474,39 @@ def _berechne_kz(von: date, bis: date, db: Session) -> tuple[dict[str, Decimal],
     return kz, posten
 
 
+# Issue #459: Kleinunternehmer (§19 UStG) schulden die Steuer als Leistungsempfänger trotzdem -
+# bei §13b-Leistungen (z. B. Provisionen ausländischer Plattformen) und beim ig. Erwerb - und
+# geben nur für diese Zeiträume eine Voranmeldung ab (§18 Abs. 4a UStG), ohne Vorsteuerabzug.
+_KU_KZ = {"kz_46", "kz_47", "kz_84", "kz_85", "kz_89", "kz_93", "kz_90", "kz_95", "kz_98"}
+
+
+def _nur_ku_kz(kz: dict[str, Decimal], posten: dict[str, list[dict]] | None = None):
+    """Beschränkt ein _berechne_kz()-Ergebnis auf die Kennzahlen, für die ein Kleinunternehmer
+    selbst Steuer schuldet. Alle übrigen (eigene Umsätze, Vorsteuer) werden 0; die Zahllast wird
+    entsprechend neu gebildet (inkl. der internen ig.-Erwerb-Steuer zu festen Sätzen, die nur in
+    der ursprünglichen Zahllast steckt)."""
+    vst = kz["kz_66"] + kz["kz_61"] + kz["kz_62"] + kz["kz_67"]
+    eigene_ust = kz["kz_83"] + kz["kz_88"]
+    zahllast = (kz["zahllast"] + vst - eigene_ust).quantize(Decimal("0.01"), ROUND_HALF_UP)
+    neu = {k: (v if k in _KU_KZ else ZERO) for k, v in kz.items()}
+    neu["zahllast"] = zahllast
+    if posten is not None:
+        posten = {k: (v if k in _KU_KZ else []) for k, v in posten.items()}
+    return neu, posten
+
+
+def _berechne_kz_fuer(unt, von: date, bis: date, db: Session):
+    """_berechne_kz() mit Kleinunternehmer-Beschränkung (Issue #459)."""
+    kz, posten = _berechne_kz(von, bis, db)
+    if unt and unt.ist_kleinunternehmer:
+        kz, posten = _nur_ku_kz(kz, posten)
+    return kz, posten
+
+
+def _hat_ku_steuer(kz: dict[str, Decimal]) -> bool:
+    return any(kz.get(k, ZERO) != ZERO for k in _KU_KZ)
+
+
 # Bemessungsgrundlage-Kennzahlen, die ELSTER in vollen Euro erwartet (Issue #428) - nur diese
 # werden für die "ELSTER-Eingabewert"-Spalte auf volle Euro gerundet; die direkt gemeldeten
 # Steuerbeträge (83/88/98/47/85) und Vorsteuerbeträge (66/61/62/67) bleiben centgenau, da sie
@@ -816,6 +849,12 @@ def ustva_berechnen(
     # Kleinunternehmerstatus (Vorjahressteuer ≤ 2.000 €).
     fa_befreit = (getattr(unt, "voranmeldungsrhythmus", None) == "keine") and not ist_ku
     befreit = ist_ku or fa_befreit
+    ku_kz = None
+    if ist_ku:
+        # Issue #459: Zeiträume mit §13b/ig. Erwerb sind auch für Kleinunternehmer meldepflichtig
+        ku_kz, _ = _berechne_kz_fuer(unt, von, bis, db)
+        if _hat_ku_steuer(ku_kz):
+            befreit = False
 
     if befreit:
         kz: dict = {k: ZERO for k in ALL_KZ_KEYS}
@@ -829,6 +868,13 @@ def ustva_berechnen(
                        "Vorjahressteuer ≤ 2.000 €). Prüfe diese Einstellung unter Einstellungen → "
                        "Unternehmen → Steuer & Recht, falls sich deine Situation geändert hat.")
         gerundet, zahllast_elster, zahllast_diff = {}, ZERO, ZERO
+    elif ku_kz is not None:
+        kz = ku_kz
+        hinweis = ("Als Kleinunternehmer nach §19 UStG gibst du nur für Zeiträume eine Voranmeldung ab, "
+                   "in denen du selbst Steuer schuldest – hier für §13b-Leistungen bzw. innergemeinschaftliche "
+                   "Erwerbe (§18 Abs. 4a UStG). Gemeldet wird nur diese Steuer, ein Vorsteuerabzug ist "
+                   "ausgeschlossen; deine eigenen Umsätze gehören nicht hinein.")
+        gerundet, zahllast_elster, zahllast_diff = _elster_rundung(kz)
     else:
         kz, _ = _berechne_kz(von, bis, db)
         hinweis = None
@@ -857,9 +903,25 @@ def ustva_posten(
     nr = kz if kz.startswith("kz_") else f"kz_{kz}"
     if nr not in ALL_KZ_KEYS:
         raise HTTPException(422, f"Unbekannte Kennziffer: {kz}")
-    _, posten = _berechne_kz(von, bis, db)
+    _, posten = _berechne_kz_fuer(db.query(Unternehmen).first(), von, bis, db)
     eintraege = sorted(posten.get(nr, []), key=lambda p: p["datum"])
     return [UStVAPostenItem(**p) for p in eintraege]
+
+
+class KUPruefung(BaseModel):
+    hat_reverse_charge: bool
+
+
+@router.get("/kleinunternehmer-pruefen", response_model=KUPruefung)
+def ku_pruefen(db: Session = Depends(get_db)):
+    """Issue #459: Menüpunkt UStVA für Kleinunternehmer nur zeigen, wenn es überhaupt
+    §13b-/ig.-Erwerb-Buchungen gibt (Journal oder Vorsteuer-Anspruch)."""
+    sonderfaelle = ("ig_erwerb", "13b_abs1", "13b_abs2")
+    hat = (
+        db.query(Journaleintrag.id).filter(Journaleintrag.ust_sonderfall.in_(sonderfaelle)).first() is not None
+        or db.query(VorsteuerAnspruch.id).filter(VorsteuerAnspruch.ust_sonderfall.in_(sonderfaelle)).first() is not None
+    )
+    return KUPruefung(hat_reverse_charge=hat)
 
 
 @router.post("/speichern")
@@ -899,7 +961,7 @@ def ustva_pdf(
     if not unt:
         raise HTTPException(404, "Unternehmensdaten nicht gefunden.")
     von, bis, _ = _zeitraum_grenzen(zeitraum)
-    kz, _ = _berechne_kz(von, bis, db)
+    kz, _ = _berechne_kz_fuer(unt, von, bis, db)
     gerundet, zahllast_elster, zahllast_diff = _elster_rundung(kz)
     pdf_bytes = _generate_pdf(zeitraum, kz, unt, gerundet, zahllast_elster, zahllast_diff)
     return StreamingResponse(
@@ -918,15 +980,15 @@ def ustva_xml(
     unt = db.query(Unternehmen).first()
     if not unt:
         raise HTTPException(404, "Unternehmensdaten nicht gefunden.")
-    if unt.ist_kleinunternehmer:
-        raise HTTPException(422, "Kleinunternehmer §19 reichen keine Umsatzsteuer-Voranmeldung ein.")
+    von, bis, _ = _zeitraum_grenzen(zeitraum)
+    kz, _ = _berechne_kz_fuer(unt, von, bis, db)
+    if unt.ist_kleinunternehmer and not _hat_ku_steuer(kz):
+        raise HTTPException(422, "Als Kleinunternehmer (§19 UStG) gibst du für diesen Zeitraum keine "
+                                 "Umsatzsteuer-Voranmeldung ab – es gibt keine §13b-Leistungen oder ig. Erwerbe.")
     try:
         stnr13 = steuernummer_elster13(unt.steuernummer, unt.bundesland)
     except ElsterExportFehler as exc:
         raise HTTPException(422, str(exc))
-    von, bis, _ = _zeitraum_grenzen(zeitraum)
-
-    kz, _ = _berechne_kz(von, bis, db)
     gerundet, zahllast_elster, _ = _elster_rundung(kz)
 
     kz_werte = {nr: gerundet.get(nr, kz[f"kz_{nr}"]) for _, nr, *_ in KZ_META}
@@ -995,7 +1057,8 @@ def _berechne_ku_kz48(von: date, bis: date, db: Session) -> Decimal:
         )
         .all()
     )
-    total = sum(Decimal(str(e.brutto_betrag or 0)) for e in eintraege)
+    # Startwert Decimal: ohne Einnahmen lieferte sum() int 0 und .quantize() schlug fehl
+    total = sum((Decimal(str(e.brutto_betrag or 0)) for e in eintraege), Decimal("0"))
     return total.quantize(Decimal("0.01"), ROUND_HALF_UP)
 
 
@@ -1104,6 +1167,14 @@ def _generate_pdf_jahres(jahr: int, ergebnis: JahresUStVAErgebnis, unt: Unterneh
             "damit das Finanzamt prüfen kann ob die §19-Grenze eingehalten wurde.",
             fill=True, align="L")
         pdf.ln(4)
+        # Issue #459: Steuer als Leistungsempfänger (§13b/ig. Erwerb) schuldet auch der Kleinunternehmer
+        ku_zeilen = [m for m in KZ_META if f"kz_{m[1]}" in _KU_KZ and getattr(ergebnis, f"kz_{m[1]}", ZERO) != ZERO]
+        if ku_zeilen:
+            section("Steuer als Leistungsempfänger (§13b UStG / ig. Erwerb)")
+            for (_abschnitt, kz_nr, bezeichnung, ist_steuer, _auto) in ku_zeilen:
+                kz_row(kz_nr, bezeichnung, getattr(ergebnis, f"kz_{kz_nr}"), ist_steuer=ist_steuer)
+            kz_row("—", "Zu zahlende Umsatzsteuer (ohne Vorsteuerabzug)", ergebnis.zahllast, bold=True)
+            pdf.ln(4)
     else:
         # Reguläre KZ-Tabelle (nur Zeilen ≠ 0)
         letzter_abschnitt = None
@@ -1214,7 +1285,8 @@ def jahresumsatzsteuer(
 
     kz_48 = ZERO
     if ist_ku:
-        kz: dict[str, Decimal] = {k: ZERO for k in ALL_KZ_KEYS}
+        # §13b/ig. Erwerb schuldet auch der Kleinunternehmer (Issue #459), alles andere bleibt 0
+        kz, _ = _berechne_kz_fuer(unt, von, bis, db)
         kz_48 = _berechne_ku_kz48(von, bis, db)
     else:
         kz, _ = _berechne_kz(von, bis, db)
@@ -1271,7 +1343,8 @@ def jahresumsatzsteuer_pdf(
 
     kz_48 = ZERO
     if ist_ku:
-        kz: dict[str, Decimal] = {k: ZERO for k in ALL_KZ_KEYS}
+        # §13b/ig. Erwerb schuldet auch der Kleinunternehmer (Issue #459), alles andere bleibt 0
+        kz, _ = _berechne_kz_fuer(unt, von, bis, db)
         kz_48 = _berechne_ku_kz48(von, bis, db)
     else:
         kz, _ = _berechne_kz(von, bis, db)

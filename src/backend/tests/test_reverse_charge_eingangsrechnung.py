@@ -129,3 +129,53 @@ def test_freie_journalbuchung_kleinunternehmer_ohne_vorsteuer(db):
     kz, _ = _berechne_kz(date(2026, 8, 1), date(2026, 8, 31), db)
     assert kz["kz_47"] == Decimal("19.00")
     assert kz["kz_67"] == (Decimal("0.00") if db.ist_ku else Decimal("19.00"))
+
+
+# ---------------------------------------------------------------------------
+# UStVA für Kleinunternehmer: nur §13b/ig. Erwerb, ohne Vorsteuer (§18 Abs. 4a UStG)
+# ---------------------------------------------------------------------------
+
+def test_ustva_kleinunternehmer_mit_13b(db):
+    from api.ustva import jahresumsatzsteuer, ku_pruefen, ustva_berechnen, ustva_posten
+    _provision(db, "0")
+    ergebnis = ustva_berechnen("2026-08", db=db)
+    assert ergebnis.befreit is False
+    assert ergebnis.kz_46 == Decimal("100.00") and ergebnis.kz_47 == Decimal("19.00")
+    if db.ist_ku:
+        assert ergebnis.kz_67 == Decimal("0.00")
+        assert ergebnis.zahllast == Decimal("19.00")
+        assert ergebnis.hinweis and "§18 Abs. 4a" in ergebnis.hinweis
+        assert ku_pruefen(db=db).hat_reverse_charge is True
+        assert jahresumsatzsteuer(2026, db=db).kz_47 == Decimal("19.00")
+        assert ustva_posten("2026-08", "66", db=db) == []
+    else:
+        assert ergebnis.zahllast == Decimal("0.00")
+
+
+def test_ustva_kleinunternehmer_ohne_13b_bleibt_befreit(db):
+    from fastapi import HTTPException
+    from api.ustva import ku_pruefen, ustva_berechnen, ustva_xml
+    if not db.ist_ku:
+        pytest.skip("nur Kleinunternehmer")
+    ergebnis = ustva_berechnen("2026-08", db=db)
+    assert ergebnis.befreit is True
+    assert ku_pruefen(db=db).hat_reverse_charge is False
+    with pytest.raises(HTTPException) as exc:
+        ustva_xml("2026-08", db=db)
+    assert exc.value.status_code == 422
+
+
+def test_ustva_kleinunternehmer_eigene_umsaetze_nicht_gemeldet(db):
+    """Eigene Ausgangsumsätze eines Kleinunternehmers gehören nicht in die Voranmeldung."""
+    from api.ustva import ustva_berechnen
+    if not db.ist_ku:
+        pytest.skip("nur Kleinunternehmer")
+    _provision(db, "19")
+    resp = create_rechnung(RechnungCreate(
+        typ="ausgang", datum=date(2026, 8, 10), partner_freitext="Gast",
+        positionen=[RechnungspositionCreate(beschreibung="Übernachtung", netto=Decimal("500"), ust_satz=Decimal("0"))],
+    ), db)
+    finalisiere_rechnung(resp.id, db)
+    ergebnis = ustva_berechnen("2026-08", db=db)
+    assert ergebnis.kz_81 == Decimal("0.00") and ergebnis.kz_86 == Decimal("0.00")
+    assert ergebnis.zahllast == Decimal("19.00")

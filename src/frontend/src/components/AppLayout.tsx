@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getTagesabschlussFehltGestern, getUnternehmen, pruefZM, pruefenWiederkehrend, getFaelligeBuchungsvorlagen, getMahnwesenEinstellungen, getProfile, openUrl, isTauri, postfachAbrufen, type EntwurfErgebnis } from '../api/client'
+import { getTagesabschlussFehltGestern, getUnternehmen, pruefZM, pruefKleinunternehmerUStVA, pruefenWiederkehrend, getFaelligeBuchungsvorlagen, getMahnwesenEinstellungen, getProfile, openUrl, isTauri, postfachAbrufen, type EntwurfErgebnis } from '../api/client'
 import { TagesabschlussDialog } from '../pages/journal/TagesabschlussDialog'
 import { useUpdateCheck } from '../hooks/useUpdateCheck'
 import { useAnsicht } from '../hooks/useAnsicht'
@@ -34,7 +34,7 @@ import type { Unternehmen, ZMPruefung } from '../api/client'
 // Issue #451: Postfach-Abruf beim Start nur einmal pro App-Sitzung
 let postfachStartAbrufErledigt = false
 
-type NavKontext = { unt: Unternehmen | undefined; zm: ZMPruefung | undefined }
+type NavKontext = { unt: Unternehmen | undefined; zm: ZMPruefung | undefined; kuReverseCharge?: boolean }
 type ZeigenFn = (k: NavKontext) => boolean
 
 const auswertungNavAlle: { to: string; label: string; icon: string; zeigen: ZeigenFn }[] = [
@@ -46,7 +46,7 @@ const auswertungNavAlle: { to: string; label: string; icon: string; zeigen: Zeig
   { to: '/inventurliste',     label: 'Inventurliste',  icon: 'checklist',      zeigen: ({ unt }) => !!unt?.lagerführung_aktiv },
   { to: '/kontokorrent',      label: 'Kontokorrent',   icon: 'balance',        zeigen: () => true },
   { to: '/verbindlichkeiten', label: 'Verbindlichkeiten', icon: 'payments',    zeigen: () => true },
-  { to: '/ustva',             label: 'UStVA',         icon: 'account_balance', zeigen: ({ unt }) => !unt?.ist_kleinunternehmer },
+  { to: '/ustva',             label: 'UStVA',         icon: 'account_balance', zeigen: ({ unt, kuReverseCharge }) => !unt?.ist_kleinunternehmer || !!kuReverseCharge },  // Issue #459
   { to: '/jahres-ust',        label: 'Jahres-USt',    icon: 'calendar_month',  zeigen: () => true },
   { to: '/zm',                label: 'ZM',            icon: 'public',          zeigen: ({ zm }) => !!zm?.hat_ig_eintraege },
   { to: '/anlage-s',          label: 'Anlage S',      icon: 'article',         zeigen: ({ unt }) => unt?.taetigkeitsart !== 'gewerbe' },
@@ -362,7 +362,14 @@ export function AppLayout() {
   })
 
   const untDef = unt ?? undefined
-  const navKontext: NavKontext = { unt: untDef, zm: zmPruefung }
+  // Issue #459: Kleinunternehmer mit §13b/ig. Erwerb müssen dafür eine UStVA abgeben
+  const { data: kuPruefung } = useQuery({
+    queryKey: ['ustva-ku-pruefen'],
+    queryFn: pruefKleinunternehmerUStVA,
+    staleTime: 1000 * 60 * 10,
+    enabled: !!unt?.ist_kleinunternehmer,
+  })
+  const navKontext: NavKontext = { unt: untDef, zm: zmPruefung, kuReverseCharge: kuPruefung?.hat_reverse_charge }
   const auswertungNav = auswertungNavAlle.filter(n => n.zeigen(navKontext))
   const fakturierungNav = [
     ...fakturierungAlleItems.filter(n => n.zeigen(untDef)),

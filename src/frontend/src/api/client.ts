@@ -2128,6 +2128,10 @@ export type ZMPruefung = {
 export const pruefZM = () =>
   request<ZMPruefung>('/zm/pruefen')
 
+/** Issue #459: gibt es §13b-/ig.-Erwerb-Buchungen? Dann braucht auch ein Kleinunternehmer die UStVA. */
+export const pruefKleinunternehmerUStVA = () =>
+  request<{ hat_reverse_charge: boolean }>('/ustva/kleinunternehmer-pruefen')
+
 export const berechneZM = (zeitraum: string) =>
   request<ZMErgebnis>(`/zm/berechnen?zeitraum=${encodeURIComponent(zeitraum)}`)
 
