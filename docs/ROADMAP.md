@@ -90,7 +90,8 @@ kommen Rechnungen überwiegend per Mail. Zwei Zugangswege mit gemeinsamem Kern
 
 Wunsch von Peter1061, Recherche von herrschmidt (Issue #360): Kennzahlen nicht mehr in ELSTER abtippen.
 
-- [ ] **Stufe 1 – Datei für den Upload in Mein ELSTER** (keine Registrierung, kein Zertifikat):
+- [x] **Stufe 1 – Datei für den Upload in Mein ELSTER** (keine Registrierung, kein Zertifikat) – umgesetzt von herrschmidt (PR #460), Kennzahlen-Fehler davor behoben (#456 ZM, #457 KZ 43/87, #458 KZ 41, #459 §13b/Kleinunternehmer):
+  - **Offen:** ZM und KZ 21/41/43 werden nach Zahlungsdatum zugeordnet – für die ZM ist nach §18a Abs. 8 UStG vermutlich der Leistungs-/Rechnungsmonat maßgeblich (Rückfrage an herrschmidt in PR #460).
   - UStVA als XML: nur der Nutzdatenteil `Anmeldungssteuern` (Namensraum
     `http://finkonsens.de/elster/elsteranmeldung/ustva/v20xx`, passendes `version`-Attribut je
     Jahresversion – häufigste Fehlerursache beim Import), Zeichensatz ISO-8859-15. Reine Ausgabe der
@@ -229,6 +230,8 @@ Wenn eine Beta-Funktion sich bei der Testgruppe bewährt hat, wird **nicht der g
 - **Rich-Text-Editor für Einleitungstext** – WYSIWYG-Editor (z. B. TipTap oder Quill) statt Markdown-Textarea für den Einleitungstext auf Rechnungen; aktuell: Markdown mit `**fett**`-Unterstützung im PDF
 
 - **Thunderbird-Versand auf weitere Dokumenttypen ausweiten** – bisher nur für Rechnungen umgesetzt (Issue #147); Angebote, Proforma, Aufträge, Mahnungen und Belege laufen weiterhin ausschließlich über SMTP/mailto. Gleiches Muster (`sendeUeberThunderbird()` in `utils/thunderbirdVersand.ts`), nur die jeweilige `handleMail()`-Stelle ergänzen.
+
+- **§13b-/Reverse-Charge-Kennzeichen für eigene Kategorien** (Issue #459) – die Sonderfall-Behandlung (§13b Abs. 1/2, ig. Erwerb, Einfuhrumsatzsteuer) hängt an `kategorien.ust_sonderfall`, das bisher nur die mitgelieferten Kategorien tragen; selbst angelegte Kategorien (z. B. „Plattformgebühren Airbnb“) werden nur über das SKR-Konto (3123/5923 usw.) erkannt. Auswahlfeld in der Kategorienverwaltung (Schema/API/Formular), Konto-Heuristik bleibt Fallback.
 
 - **Erweiterbare Kontenpläne** – Built-in-Pakete (SKR03 vollständig) und CSV-Import eigener Kontenpläne
 - **LLM-gestützte Felderkennung** – lokales Modell via ollama als Opt-in für bessere OCR-Zuordnung
