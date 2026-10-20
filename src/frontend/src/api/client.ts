@@ -1425,6 +1425,8 @@ export type Rechnung = {
 
 export type RechnungCreate = {
   typ: 'eingang' | 'ausgang'
+  // Datenübernahme: außerhalb von RechnungsFee erstellte Ausgangsrechnung (Sperre wie CSV-Import)
+  extern_erstellt?: boolean
   rechnungsnummer?: string
   datum: string
   leistung_von?: string

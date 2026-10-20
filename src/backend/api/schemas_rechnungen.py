@@ -92,6 +92,9 @@ class RechnungspositionResponse(BaseModel):
 
 class RechnungCreate(BaseModel):
     typ: str  # eingang|ausgang
+    # Ausgangsrechnung wurde außerhalb von RechnungsFee erstellt (Datenübernahme) - gleiche Sperre
+    # wie beim CSV-Import: kein neues PDF/ZUGFeRD, kein Versand, keine Mahnung (import_quelle='extern')
+    extern_erstellt: bool = False
     rechnungsnummer: Optional[str] = None
     datum: date
     leistung_von: Optional[date] = None

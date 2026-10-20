@@ -772,8 +772,8 @@ def _berechne_mahnung(
     rechnungen = db.query(Rechnung).filter(Rechnung.id.in_(rechnung_ids)).all()
     if not rechnungen:
         raise HTTPException(status_code=404, detail="Keine Rechnungen gefunden.")
-    if any(r.import_quelle == "papierkram" for r in rechnungen):
-        raise HTTPException(status_code=409, detail="Importierte Rechnung kann nicht gemahnt werden. Das Original findest du im Altsystem.")
+    if any(r.import_quelle for r in rechnungen):
+        raise HTTPException(status_code=409, detail="Extern erstellte bzw. importierte Rechnung kann nicht gemahnt werden – maßgeblich ist das Original.")
     kunde_ids = {r.kunde_id for r in rechnungen}
     if len(kunde_ids) > 1:
         raise HTTPException(status_code=422, detail="Alle Rechnungen müssen zum selben Kunden gehören.")
@@ -1351,7 +1351,7 @@ def mahnung_pdf_bytes(db: Session, mahnung: Mahnung, nur_ansehen: bool = False) 
     rechnungen_by_id = {
         r.id: r for r in db.query(Rechnung).filter(Rechnung.id.in_([l.rechnung_id for l in links])).all()
     }
-    if any(r.import_quelle == "papierkram" for r in rechnungen_by_id.values()):
+    if any(r.import_quelle for r in rechnungen_by_id.values()):
         raise HTTPException(status_code=409, detail="Diese Mahnung enthält eine importierte Rechnung und kann nicht ausgegeben werden.")
     positionen = []
     for link in links:

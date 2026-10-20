@@ -1378,6 +1378,16 @@ def rechnung_vorschau(data: RechnungVorschauRequest, db: Session = Depends(get_d
 
 @router.post("", response_model=RechnungResponse, status_code=201)
 def create_rechnung(data: RechnungCreate, db: Session = Depends(get_db)):
+    if data.extern_erstellt:
+        if data.typ != "ausgang" or (data.dokument_typ or "Rechnung") != "Rechnung":
+            raise HTTPException(status_code=422, detail="Nur Ausgangsrechnungen können als extern erstellt erfasst werden.")
+        unternehmen = db.query(Unternehmen).first()
+        if not (unternehmen and unternehmen.datenmigration_aktiv):
+            raise HTTPException(
+                status_code=422,
+                detail="Extern erstellte Rechnungen lassen sich nur erfassen, wenn unter Einstellungen → Unternehmen → Funktionen die Datenübernahme aktiv ist.",
+            )
+        return _create_rechnung(data, db, import_quelle="extern")
     return _create_rechnung(data, db)
 
 
@@ -1895,8 +1905,8 @@ def markiere_ausgegeben(rechnung_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Rechnung nicht gefunden.")
     if rechnung.ist_entwurf:
         raise HTTPException(status_code=409, detail="Entwürfe werden nicht als ausgegeben markiert.")
-    if rechnung.import_quelle == "papierkram":
-        raise HTTPException(status_code=409, detail="Importierte Rechnung kann nicht als neu ausgegeben markiert werden. Das Original findest du im Altsystem.")
+    if rechnung.import_quelle:
+        raise HTTPException(status_code=409, detail="Extern erstellte bzw. importierte Rechnung kann nicht als neu ausgegeben markiert werden – maßgeblich ist das Original.")
     rechnung.ausgegeben = True
     if not rechnung.ausgegeben_am:
         rechnung.ausgegeben_am = datetime.now()
@@ -1915,7 +1925,7 @@ def rechnung_als_pdf(rechnung_id: int, vorlage: int = -1, download: bool = False
     rechnung = db.query(Rechnung).filter(Rechnung.id == rechnung_id).first()
     if not rechnung:
         raise HTTPException(status_code=404, detail="Rechnung nicht gefunden.")
-    if rechnung.import_quelle == "papierkram":
+    if rechnung.import_quelle:
         if nur_ansehen and rechnung.original_pdf_pfad:
             original = APP_DATA_DIR / rechnung.original_pdf_pfad
             if original.is_file():
@@ -1923,7 +1933,7 @@ def rechnung_als_pdf(rechnung_id: int, vorlage: int = -1, download: bool = False
                     content=original.read_bytes(), media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{rechnung.rechnungsnummer or rechnung_id}_Original.pdf"', "Cache-Control": "no-store"},
                 )
-        raise HTTPException(status_code=409, detail="Importierte Rechnung: PDF-Erzeugung ist gesperrt. Das Original findest du im Altsystem; ein vorhandenes Original-PDF kann als Beleg angehängt werden.")
+        raise HTTPException(status_code=409, detail="Extern erstellte bzw. importierte Rechnung: PDF-Erzeugung ist gesperrt – maßgeblich ist das Original. Ein vorhandenes Original-PDF kann als Beleg angehängt werden.")
 
     # Absenderdaten: Snapshot hat Vorrang vor aktuellen Stammdaten (GoBD – finalisierte Dokumente sind unveränderlich)
     unternehmen = db.query(Unternehmen).first()
@@ -2401,8 +2411,8 @@ def rechnung_als_zugferd(rechnung_id: int, db: Session = Depends(get_db)):
     rechnung = db.query(Rechnung).filter(Rechnung.id == rechnung_id).first()
     if not rechnung:
         raise HTTPException(status_code=404, detail="Rechnung nicht gefunden.")
-    if rechnung.import_quelle == "papierkram":
-        raise HTTPException(status_code=409, detail="Importierte Rechnung kann nicht als ZUGFeRD neu ausgegeben werden. Das Original findest du im Altsystem.")
+    if rechnung.import_quelle:
+        raise HTTPException(status_code=409, detail="Extern erstellte bzw. importierte Rechnung kann nicht als ZUGFeRD neu ausgegeben werden – maßgeblich ist das Original.")
     if rechnung.typ != "ausgang":
         raise HTTPException(status_code=400, detail="ZUGFeRD ist nur für Ausgangsrechnungen verfügbar.")
     if getattr(rechnung, "dokument_typ", "Rechnung") != "Rechnung":

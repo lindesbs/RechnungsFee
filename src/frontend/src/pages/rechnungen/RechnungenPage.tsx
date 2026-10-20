@@ -1478,16 +1478,21 @@ function RechnungDetail({
       </div>
 
       <div className="p-5 space-y-5 flex-1">
-        {rechnung.import_quelle === 'papierkram' && (
+        {rechnung.import_quelle && (
           <div role="note" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-            Importiert – Original im Altsystem. Diese Rechnung bleibt als offener Posten sichtbar, kann aber nicht neu als PDF erzeugt, versendet oder gemahnt werden. Ein vorhandener Originalbeleg kann weiterhin angehängt werden.
+            {rechnung.import_quelle === 'extern'
+              ? 'Extern erstellt – das Original liegt außerhalb von RechnungsFee.'
+              : 'Importiert – Original im Altsystem.'}{' '}
+            Diese Rechnung bleibt als offener Posten sichtbar, kann aber nicht neu als PDF erzeugt, versendet oder gemahnt werden. Original und ggf. Berichtigung kannst du unten als Beleg anhängen.
           </div>
         )}
 
         {/* Aktionsleiste */}
         <div className="flex flex-wrap gap-2">
-          {rechnung.import_quelle === 'papierkram' ? (
-            <span className="self-center text-xs text-amber-700 dark:text-amber-300">PDF- und Mailversand gesperrt – Original im Altsystem</span>
+          {rechnung.import_quelle ? (
+            <span className="self-center text-xs text-amber-700 dark:text-amber-300">
+              PDF- und Mailversand gesperrt – {rechnung.import_quelle === 'extern' ? 'Original extern erstellt' : 'Original im Altsystem'}
+            </span>
           ) : rechnung.ist_entwurf || (rechnung.dokument_typ === 'Gutschrift' && rechnung.zahlungsstatus !== 'bezahlt') ? (
             <button
               onClick={handlePdfOeffnen}
@@ -2359,8 +2364,8 @@ function RechnungDetail({
           </div>
         )}
 
-        {/* Beleg-Anhang – nur für Eingangsrechnungen */}
-        {rechnung.typ === 'eingang' && <div>
+        {/* Beleg-Anhang – Eingangsrechnungen sowie importierte/extern erstellte Ausgangsrechnungen (Original) */}
+        {(rechnung.typ === 'eingang' || !!rechnung.import_quelle) && <div>
           <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">Beleg</p>
           {rechnung.beleg ? (
             <div className="bg-slate-50 dark:bg-slate-900 rounded-lg px-3 py-2.5 space-y-1.5">
@@ -2710,6 +2715,7 @@ function RechnungForm({
   const [schlusstext, setSchlusstext] = useState(initial?.schlusstext ?? '')
   const [externeBelegnr, setExterneBelegnr] = useState(pf?.externe_belegnr ?? initial?.externe_belegnr ?? '')
   const [kundenBestellnummer, setKundenBestellnummer] = useState(initial?.kunden_bestellnummer ?? '')
+  const [externErstellt, setExternErstellt] = useState(false)
   const [positionen, setPositionen] = useState<Positionszeile[]>(() => {
     if (prefillFromAnalyse?.positionen?.length) {
       return prefillFromAnalyse.positionen.map((p) => ({
@@ -3308,6 +3314,7 @@ const kundeIdNum = partnerId ? parseInt(partnerId) : null
       schlusstext: schlusstext || null,
       externe_belegnr: typ === 'eingang' ? (externeBelegnr || undefined) : undefined,
       kunden_bestellnummer: typ === 'ausgang' ? (kundenBestellnummer || undefined) : undefined,
+      extern_erstellt: !initial && typ === 'ausgang' && externErstellt ? true : undefined,
       ist_entwurf: istEntwurf,
       skonto_prozent: dokumentTyp === 'Lieferschein' ? undefined : (skontoProzent ? parseFloat(skontoProzent) : undefined),
       skonto_tage: dokumentTyp === 'Lieferschein' ? undefined : (skontoTage ? parseInt(skontoTage) : undefined),
@@ -4425,6 +4432,28 @@ const kundeIdNum = partnerId ? parseInt(partnerId) : null
             placeholder="Bestell-/Referenznummer des Kunden"
           />
         </div>
+      )}
+
+      {/* Datenübernahme: Altrechnung, die außerhalb von RechnungsFee geschrieben und verschickt wurde.
+          Nur beim Neuanlegen - danach gilt die gleiche Sperre wie beim CSV-Import. */}
+      {typ === 'ausgang' && !initial && dokumentTyp === 'Rechnung' && unternehmen?.datenmigration_aktiv && (
+        <label className="flex items-start gap-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-950/20 p-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={externErstellt}
+            onChange={(e) => setExternErstellt(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-200">
+            Extern erstellte Rechnung (Altbestand)
+            <span className="block text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Für Rechnungen, die außerhalb von RechnungsFee geschrieben und verschickt wurden – z. B. beim Umstieg
+              mit Originalnummer und -datum. Maßgeblich bleibt das Original: RechnungsFee erzeugt dafür kein eigenes
+              PDF, versendet und mahnt sie nicht. Zahlungen, Umsatzsteuer und offene Posten laufen normal.
+              Original und ggf. Berichtigung kannst du danach als Beleg anhängen.
+            </span>
+          </span>
+        </label>
       )}
 
       <div className="flex gap-2">
