@@ -271,6 +271,17 @@ def _klassifiziere_sonderfall(
 _ADDITIVE_SONDERFAELLE = ("ig_erwerb", "13b_abs1", "13b_abs2")
 
 
+def _ist_additive_position(pos) -> bool:
+    """Gespeicherte Position mit USt nur nebenher (Issue #459): pos.brutto ist dann der Netto-/
+    Zahlbetrag und die USt wurde aus genau diesem Betrag berechnet. Normale Positionen
+    (brutto = netto + USt) und Entwürfe von vor dem Fix erfüllen das nicht."""
+    satz = pos.ust_satz or Decimal("0")
+    return bool(
+        satz > 0 and pos.ust_betrag
+        and pos.ust_betrag == (pos.brutto * satz / 100).quantize(Decimal("0.01"), ROUND_HALF_UP)
+    )
+
+
 def _reverse_charge_positionen(db: Session, typ: str, positionen, rechnung_kategorie_id: int | None):
     """Gibt (positionen, additiv) zurück: additiv[i] = True, wenn Position i auf einer
     Eingangsrechnung zu einer §13b-/ig.-Erwerb-Kategorie gehört (Kategorie der Position, sonst der
@@ -323,12 +334,8 @@ def _erzeuge_vorsteuer_ansprueche(rechnung: "Rechnung", db: Session) -> None:
         satz = int(pos.ust_satz)
         kat_id = pos.kategorie_id or rechnung.kategorie_id
         key = (kat_id, satz)
-        netto_pos = pos.brutto - pos.ust_betrag
-        # Issue #459: bei Reverse Charge ist pos.brutto bereits der Nettobetrag (USt nur nebenher).
-        # Erkennbar daran, dass die USt aus pos.brutto selbst berechnet ist - Entwürfe von vor dem
-        # Fix (brutto = netto + USt) erfüllen das nicht und laufen unverändert weiter.
-        if satz > 0 and pos.ust_betrag and pos.ust_betrag == (pos.brutto * satz / 100).quantize(Decimal("0.01"), ROUND_HALF_UP):
-            netto_pos = pos.brutto
+        # Issue #459: bei Reverse Charge ist pos.brutto bereits der Nettobetrag (USt nur nebenher)
+        netto_pos = pos.brutto if _ist_additive_position(pos) else pos.brutto - pos.ust_betrag
         netto_gruppen[key] += netto_pos
         ust_gruppen[key] += pos.ust_betrag
 
@@ -3971,7 +3978,9 @@ def create_gutschrift(rechnung_id: int, db: Session = Depends(get_db)):
         )
         db.add(neue_pos)
         netto_sum += pos.netto * menge_neg
-        ust_sum += -pos.ust_betrag
+        # Reverse Charge (Issue #459): USt läuft nur nebenher, gehört nicht in den Gutschriftsbetrag
+        if not _ist_additive_position(pos):
+            ust_sum += -pos.ust_betrag
 
     gutschrift.netto_gesamt = netto_sum.quantize(Decimal("0.01"), ROUND_HALF_UP)
     gutschrift.ust_gesamt = ust_sum.quantize(Decimal("0.01"), ROUND_HALF_UP)

@@ -179,3 +179,30 @@ def test_ustva_kleinunternehmer_eigene_umsaetze_nicht_gemeldet(db):
     ergebnis = ustva_berechnen("2026-08", db=db)
     assert ergebnis.kz_81 == Decimal("0.00") and ergebnis.kz_86 == Decimal("0.00")
     assert ergebnis.zahllast == Decimal("19.00")
+
+
+def test_lieferantengutschrift_korrigiert_13b_im_gutschriftsmonat(db):
+    """Vollständige Gutschrift einer §13b-Provision in einem späteren Zeitraum: Betrag = −Netto,
+    die Steuer wird im Monat der Gutschrift berichtigt, der Ursprungsmonat bleibt unverändert."""
+    from api.rechnungen import create_gutschrift
+    kat = _kat(db)
+    resp = create_rechnung(RechnungCreate(
+        typ="eingang", datum=date(2026, 1, 10), kategorie_id=kat.id, partner_freitext="Plattform",
+        positionen=[RechnungspositionCreate(beschreibung="Provision", netto=Decimal("100"), ust_satz=Decimal("0"))],
+    ), db)
+    finalisiere_rechnung(resp.id, db)
+    zahlung_bar_erstellen(resp.id, BarZahlungCreate(datum=date(2026, 2, 2), zahlungsart="Bank"), db)
+
+    gutschrift = db.query(Rechnung).filter(Rechnung.id == create_gutschrift(resp.id, db).id).one()
+    assert gutschrift.brutto_gesamt == Decimal("-100.00")
+    gutschrift.datum = date(2026, 10, 12)
+    db.commit()
+    finalisiere_rechnung(gutschrift.id, db)
+    zahlung_bar_erstellen(gutschrift.id, BarZahlungCreate(datum=date(2026, 10, 15), zahlungsart="Bank"), db)
+
+    kz_jan, _ = _berechne_kz(date(2026, 1, 1), date(2026, 1, 31), db)
+    kz_okt, _ = _berechne_kz(date(2026, 10, 1), date(2026, 10, 31), db)
+    assert (kz_jan["kz_46"], kz_jan["kz_47"]) == (Decimal("100.00"), Decimal("19.00"))
+    assert (kz_okt["kz_46"], kz_okt["kz_47"]) == (Decimal("-100.00"), Decimal("-19.00"))
+    assert kz_okt["kz_67"] == (Decimal("0.00") if db.ist_ku else Decimal("-19.00"))
+    assert _berechne_euer(2026, db)["zeilen"].get(60, Decimal("0")) == Decimal("0")
