@@ -41,7 +41,7 @@ def test_migration_173_creates_import_mapping_vorlagen_for_version_172(tmp_path,
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         version = conn.execute("PRAGMA user_version").fetchone()[0]
     assert "import_mapping_vorlagen" in tables
-    assert version == 173
+    assert version == main.SCHEMA_VERSION
     from api.datenmigration import mapping_vorlagen_liste
     with sessionmaker(bind=engine)() as session:
         assert mapping_vorlagen_liste(db=session) == []

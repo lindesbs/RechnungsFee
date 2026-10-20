@@ -34,7 +34,7 @@ logging.root.addHandler(_log_handler)
 from database.seed import run_all_seeds
 from api import unternehmen, konten, kategorien, setup, journal, kunden, lieferanten, tagesabschluss, nummernkreise, export, rechnungen, backup, artikel, artikel_gruppen, ust_saetze, pdf_vorlagen, eks, system, ustva, zm, euer, dokumentenpakete, mail, wiederkehrend, buchungsvorlagen, anlageverzeichnis, datev, anlage_s, anlage_g, fristen_api, guv, bank_templates, bank_import, auto_filter, forderungen, cockpit, datenmigration, kontenuebersicht, schnellbuchungen, mahnwesen, profile, kontokorrent, inventurliste, postfach, rechnungen_import
 
-SCHEMA_VERSION = 173
+SCHEMA_VERSION = 174
 
 app = FastAPI(title="RechnungsFee API", version="0.1.0")
 
@@ -3831,6 +3831,61 @@ def _run_migrations() -> None:
             conn.execute(text("PRAGMA user_version = 173"))
             conn.commit()
             print("[Migration] Schema auf Version 173 (Issue #445: import_mapping_vorlagen auch auf frisch angelegten DBs)")
+
+        if version < 174:
+            # Issue #456-Nebenfund: vor v0.6.4 (#372-Fix) bekamen Zahlungen auf Ausgangsrechnungen
+            # mit ist_reverse_charge (EU-B2B-Dienstleistung, §3a Abs. 2 UStG) über den Fallback in
+            # _klassifiziere_sonderfall() fälschlich ust_sonderfall='13b_abs1' - als wären wir
+            # Leistungsempfänger. Folgen bis heute: die UStVA verbucht sie im Sonderfall-Zweig als
+            # §13b-Storno (KZ 46/47/67) statt in KZ 21. Zusätzlich hat Migration 160 genau diese
+            # Zeilen (13b + 0%) ohne Prüfung der Buchungsrichtung um 19% USt/Vorsteuer "ergänzt" -
+            # die EÜR sieht das nur deshalb nicht, weil sie bei gesetztem Sonderfall USt/Vorsteuer
+            # überspringt. Fix: Sonderfall entfernen UND die Änderung aus Migration 160 auf ihren
+            # protokollierten Altwert zurücksetzen (nur wo das Änderungsprotokoll sie belegt - sonst
+            # landete die erfundene USt nach dem Entfernen des Sonderfalls in EÜR-Zeile 17/57).
+            # Jede Änderung wird protokolliert; die Signaturen berechnet _migrate_signaturen() neu.
+            from utils.aenderungsprotokoll import protokolliere_aenderung
+
+            _grund174 = "Issue #456: Zahlung auf EU-Dienstleistung (Ausgangsrechnung, Reverse Charge) ist kein §13b-Fall - Sonderfall entfernt, USt/Vorsteuer aus Migration 160 zurückgesetzt"
+            _j174 = {r[1] for r in conn.execute(text("PRAGMA table_info(journal)")).fetchall()}
+            _r174 = {r[1] for r in conn.execute(text("PRAGMA table_info(rechnungen)")).fetchall()}
+            _vollstaendig174 = (
+                {"ust_sonderfall", "ust_satz", "ust_betrag", "vorsteuer_betrag", "rechnung_id"} <= _j174
+                and {"typ", "ist_reverse_charge"} <= _r174
+            )
+            # sehr alte/synthetische Zwischenstände ohne diese Spalten haben auch keine betroffenen Zeilen
+            _betroffene174 = [] if not _vollstaendig174 else conn.execute(text("""
+                SELECT j.id, j.ust_satz, j.ust_betrag, j.vorsteuer_betrag
+                FROM journal j
+                JOIN rechnungen r ON r.id = j.rechnung_id
+                WHERE j.ust_sonderfall = '13b_abs1'
+                AND r.typ = 'ausgang' AND r.ist_reverse_charge = 1
+            """)).fetchall()
+            for _id174, _satz174, _ust174, _vst174 in _betroffene174:
+                conn.execute(text("UPDATE journal SET ust_sonderfall = NULL WHERE id = :id"), {"id": _id174})
+                protokolliere_aenderung(
+                    conn, tabelle="journal", datensatz_id=_id174, feld="ust_sonderfall",
+                    alter_wert="13b_abs1", neuer_wert=None, migration_version=174, grund=_grund174,
+                )
+                _aktuell174 = {"ust_satz": _satz174, "ust_betrag": _ust174, "vorsteuer_betrag": _vst174}
+                _alt160 = conn.execute(text("""
+                    SELECT feld, alter_wert FROM aenderungsprotokoll
+                    WHERE tabelle = 'journal' AND datensatz_id = :id AND migration_version = 160
+                    AND feld IN ('ust_satz', 'ust_betrag', 'vorsteuer_betrag')
+                """), {"id": _id174}).fetchall()
+                for _feld174, _alterwert174 in _alt160:
+                    conn.execute(text(f"UPDATE journal SET {_feld174} = :wert WHERE id = :id"),
+                                 {"wert": _alterwert174, "id": _id174})
+                    protokolliere_aenderung(
+                        conn, tabelle="journal", datensatz_id=_id174, feld=_feld174,
+                        alter_wert=_aktuell174[_feld174], neuer_wert=_alterwert174,
+                        migration_version=174, grund=_grund174,
+                    )
+            if _betroffene174:
+                print(f"[Migration] {len(_betroffene174)} Alt-Zahlung(en) auf EU-Dienstleistungen korrigiert (Issue #456)")
+            conn.execute(text("PRAGMA user_version = 174"))
+            conn.commit()
+            print("[Migration] Schema auf Version 174 (Issue #456: Reverse-Charge-Ausgangszahlungen kein §13b-Sonderfall)")
 
 
 def _migrate_kategorien() -> None:
