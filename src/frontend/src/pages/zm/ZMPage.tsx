@@ -146,7 +146,7 @@ export function ZMPage() {
                       <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{p.land || '—'}</td>
                       <td className="px-4 py-3">
                         <span
-                          title={p.kennzeichen === 'L' ? 'L = Lieferung (Ware)' : 'D = Dienstleistung'}
+                          title={p.kennzeichen === 'L' ? 'L = Lieferung (Ware)' : 'S = sonstige Leistung (Dienstleistung)'}
                           className={`inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold text-white cursor-help ${p.kennzeichen === 'L' ? 'bg-blue-600' : 'bg-purple-600'}`}
                         >
                           {p.kennzeichen}
@@ -169,7 +169,7 @@ export function ZMPage() {
           )}
 
           <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl p-4 text-sm text-amber-800 dark:text-amber-200">
-            <strong>L</strong> = Innergemeinschaftliche Lieferung · <strong>D</strong> = Dienstleistung §13b Abs. 1<br/>
+            <strong>L</strong> = Innergemeinschaftliche Lieferung · <strong>S</strong> = sonstige Leistung an EU-Unternehmer (§3a Abs. 2 UStG, Steuerschuld beim Kunden)<br/>
             Melde die Beträge unter <a href="https://www.elster.de" target="_blank" rel="noreferrer" className="underline">ELSTER → Zusammenfassende Meldung</a> oder über das BZSt-Online-Portal.
           </div>
         </>
