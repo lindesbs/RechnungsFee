@@ -45,6 +45,7 @@ from sqlalchemy.orm import Session
 
 from database.connection import get_db
 from database.models import Journaleintrag, Kategorie, Unternehmen, UstvaExport, Rechnung, VorsteuerAnspruch
+from utils.elster import ElsterExportFehler, KZ_BEMESSUNGSGRUNDLAGE, build_ustva_xml, steuernummer_elster13
 from utils.vorsteuer_soll import CUTOVER_DATUM as CUTOVER_DATUM_VORSTEUER
 
 router = APIRouter(prefix="/api/ustva", tags=["UStVA"])
@@ -458,7 +459,7 @@ def _berechne_kz(von: date, bis: date, db: Session) -> tuple[dict[str, Decimal],
 # werden für die "ELSTER-Eingabewert"-Spalte auf volle Euro gerundet; die direkt gemeldeten
 # Steuerbeträge (83/88/98/47/85) und Vorsteuerbeträge (66/61/62/67) bleiben centgenau, da sie
 # in ELSTER selbst centgenau eingetragen werden (keine eigene Bemessungsgrundlage-Rundung).
-_BEMESSUNGSGRUNDLAGE_KZS = {"81", "86", "41", "87", "21", "45", "89", "93", "90", "95", "46", "84"}
+_BEMESSUNGSGRUNDLAGE_KZS = KZ_BEMESSUNGSGRUNDLAGE
 
 
 def _voller_euro(betrag: Decimal) -> Decimal:
@@ -882,6 +883,44 @@ def ustva_pdf(
         BytesIO(pdf_bytes),
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="UStVA_{zeitraum}.pdf"'},
+    )
+
+
+@router.get("/xml")
+def ustva_xml(
+    zeitraum: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """UStVA als ELSTER-XML (Nutzdaten) für den Upload in Mein ELSTER. Issue #360."""
+    unt = db.query(Unternehmen).first()
+    if not unt:
+        raise HTTPException(404, "Unternehmensdaten nicht gefunden.")
+    if unt.ist_kleinunternehmer:
+        raise HTTPException(422, "Kleinunternehmer §19 reichen keine Umsatzsteuer-Voranmeldung ein.")
+    try:
+        stnr13 = steuernummer_elster13(unt.steuernummer, unt.bundesland)
+    except ElsterExportFehler as exc:
+        raise HTTPException(422, str(exc))
+    von, bis, _ = _zeitraum_grenzen(zeitraum)
+
+    kz, _ = _berechne_kz(von, bis, db)
+    gerundet, zahllast_elster, _ = _elster_rundung(kz)
+
+    kz_werte = {nr: gerundet.get(nr, kz[f"kz_{nr}"]) for _, nr, *_ in KZ_META}
+    kz_werte["83"] = zahllast_elster  # Pflichtfeld: verbleibende Steuer
+
+    try:
+        xml_bytes = build_ustva_xml(
+            zeitraum=zeitraum, steuernummer13=stnr13,
+            unternehmen=unt, kz_werte=kz_werte,
+        )
+    except ElsterExportFehler as exc:
+        raise HTTPException(422, str(exc))
+
+    return StreamingResponse(
+        BytesIO(xml_bytes),
+        media_type="application/xml",
+        headers={"Content-Disposition": f'attachment; filename="UStVA_{zeitraum}_ELSTER.xml"'},
     )
 
 

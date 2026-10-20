@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { berechneZM, getUnternehmen, type ZMErgebnis } from '../../api/client'
+import { berechneZM, downloadZmCsv, getUnternehmen, type ZMErgebnis } from '../../api/client'
+import { ExportButtons } from '../../components/ExportButtons'
 import { useMxAuto } from '../../hooks/useAnsicht'
 
 const MONATE = ['', 'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
@@ -35,6 +36,17 @@ export function ZMPage() {
     queryFn: () => berechneZM(zeitraum),
     enabled: false,
   })
+
+  const [csvFehler, setCsvFehler] = useState<string | null>(null)
+
+  async function handleCsv() {
+    setCsvFehler(null)
+    try {
+      await downloadZmCsv(zeitraum)
+    } catch (e) {
+      setCsvFehler(e instanceof Error ? e.message : 'CSV-Export fehlgeschlagen')
+    }
+  }
 
   const jahre = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i)
 
@@ -122,6 +134,12 @@ export function ZMPage() {
                 )}
               </p>
             </div>
+            {ergebnis.positionen.length > 0 && (
+              <div className="flex items-center gap-2">
+                <ExportButtons formats={['elster-csv']} onExport={handleCsv} />
+                {csvFehler && <span className="text-xs text-red-600 dark:text-red-400">{csvFehler}</span>}
+              </div>
+            )}
           </div>
 
           {ergebnis.positionen.length === 0 ? (

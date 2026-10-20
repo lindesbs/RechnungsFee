@@ -19,14 +19,17 @@ import calendar
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session, aliased
 
 from database.connection import get_db
 from database.models import Journaleintrag, Rechnung, Kunde, Unternehmen
+from utils.elster import ElsterExportFehler, build_zm_csv
 
 router = APIRouter(prefix="/api/zm", tags=["ZM"])
 
@@ -289,4 +292,22 @@ def zm_berechnen(
         positionen=positionen,
         gesamt=gesamt,
         ueber_50k=gesamt >= Decimal("50000"),
+    )
+
+
+@router.get("/csv")
+def zm_csv(
+    zeitraum: str = Query(..., description="YYYY-QN oder YYYY-MM"),
+    db: Session = Depends(get_db),
+):
+    """ZM als CSV-Meldeliste für den Import in Mein ELSTER. Issue #360."""
+    ergebnis = zm_berechnen(zeitraum=zeitraum, db=db)
+    try:
+        csv_bytes = build_zm_csv(ergebnis.positionen)
+    except ElsterExportFehler as exc:
+        raise HTTPException(422, str(exc))
+    return StreamingResponse(
+        BytesIO(csv_bytes),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="ZM_{zeitraum}_ELSTER.csv"'},
     )

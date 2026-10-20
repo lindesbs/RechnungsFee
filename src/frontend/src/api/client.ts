@@ -1083,6 +1083,18 @@ async function _triggerBlobDownload(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
+/** Lädt eine ELSTER-Exportdatei; die Backend-Meldung (z. B. 422) wird als Fehlertext durchgereicht. */
+async function _downloadElsterDatei(pfad: string, fallbackName: string): Promise<string> {
+  const res = await fetch(`${await getBaseUrl()}${pfad}`)
+  if (!res.ok) {
+    const detail = await res.json().then(j => j.detail).catch(() => null)
+    throw new Error(typeof detail === 'string' ? detail : `Export fehlgeschlagen (${res.status})`)
+  }
+  const filename = res.headers.get('Content-Disposition')?.match(/filename="?([^"]+)"?/)?.[1] ?? fallbackName
+  await _triggerBlobDownload(await res.blob(), filename)
+  return filename
+}
+
 /** Lädt eine Rechnungs-PDF als Datei herunter (kein Viewer).
  *  Für den Mail-Workflow: User speichert die PDF und hängt sie manuell an. */
 export async function downloadPdfForMail(rechnungId: number): Promise<void> {
@@ -2038,6 +2050,10 @@ export const getUStVAPdfUrl = async (zeitraum: string): Promise<string> => {
   return `${base}/ustva/pdf?zeitraum=${encodeURIComponent(zeitraum)}`
 }
 
+/** UStVA als ELSTER-XML (Upload-Datei für Mein ELSTER) herunterladen. */
+export const downloadUstvaXml = (zeitraum: string): Promise<string> =>
+  _downloadElsterDatei(`/ustva/xml?zeitraum=${encodeURIComponent(zeitraum)}`, `UStVA_${zeitraum}_ELSTER.xml`)
+
 export type UStVAPosten = {
   quelle: 'journal' | 'vorsteuer_anspruch'
   quelle_id: number
@@ -2112,6 +2128,10 @@ export const pruefZM = () =>
 
 export const berechneZM = (zeitraum: string) =>
   request<ZMErgebnis>(`/zm/berechnen?zeitraum=${encodeURIComponent(zeitraum)}`)
+
+/** ZM als CSV-Meldeliste (Import-Datei für Mein ELSTER) herunterladen. */
+export const downloadZmCsv = (zeitraum: string): Promise<string> =>
+  _downloadElsterDatei(`/zm/csv?zeitraum=${encodeURIComponent(zeitraum)}`, `ZM_${zeitraum}_ELSTER.csv`)
 
 // --- EÜR ---
 
