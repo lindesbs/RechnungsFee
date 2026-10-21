@@ -86,6 +86,22 @@ kommen Rechnungen überwiegend per Mail. Zwei Zugangswege mit gemeinsamem Kern
 
 ---
 
+## 📋 Nach v0.7.4 – vorgemerkt
+
+- [ ] **Rechnungsnummer erst beim Finalisieren** (Issue #465, pasarn) – bisher ziehen Entwürfe von
+  Ausgangs-/Eingangs-/Abschlagsrechnungen und Gutschriften ihre Nummer schon beim Anlegen
+  (`_create_rechnung()` sowie ~10 Umwandlungswege: Angebot/Auftrag/Lieferschein/Proforma → Rechnung,
+  Sammelrechnung, Ersatzrechnung, Gutschrift, wiederkehrende Rechnungen); gelöschte Entwürfe hinterlassen
+  Lücken, spät finalisierte Entwürfe brechen die Reihenfolge. Plan: Entwurf ohne Nummer (außer manuell
+  eingetragen), Vergabe in `finalisiere_rechnung()` aus dem passenden Kreis (rechnung_ausgang/-eingang,
+  abschlagsrechnung, gutschrift, rechnung_wiederkehrend falls aktiv bei `vorlage_id`); direkt finalisiert
+  angelegte Rechnungen sofort; Frontend mit fehlender Nummer (Liste, Vorschau-PDF „Entwurf“,
+  Mail-Platzhalter, Dateinamen); bestehende Entwürfe behalten ihre Nummer (kein Doppel-Vergeben);
+  Angebot/Auftrag/Lieferschein unverändert (Proforma-Entwürfe sind bereits ohne Nummer).
+- [ ] **Meldezeitraum ZM / KZ 21 / KZ 41** – siehe Abschnitt ELSTER-Export unten.
+
+---
+
 ## 📋 ELSTER-Export: Umsatzsteuer-Voranmeldung und Zusammenfassende Meldung (Issue #360)
 
 Wunsch von Peter1061, Recherche von herrschmidt (Issue #360): Kennzahlen nicht mehr in ELSTER abtippen.
