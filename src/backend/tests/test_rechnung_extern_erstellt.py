@@ -152,3 +152,22 @@ def test_extern_erstellt_nur_mit_aktiver_datenuebernahme(db):
     assert exc.value.status_code == 422
     assert "Datenübernahme" in exc.value.detail
     assert db.query(Rechnung).count() == 0
+
+
+# ---------------------------------------------------------------------------
+# Issue #464: Steuerfall der letzten Kundenrechnung wird übernommen
+# ---------------------------------------------------------------------------
+
+def test_letzter_steuerfall_des_kunden(db):
+    from api.rechnungen import letzter_steuerfall
+    kunde = db.query(Kunde).first()
+    assert letzter_steuerfall(kunde.id, db=db).ist_reverse_charge is False  # noch keine Rechnung
+    create_rechnung(_daten(db, extern_erstellt=False, rechnungsnummer="RE-1", datum=date(2026, 3, 1),
+                           ist_reverse_charge=True), db=db)
+    create_rechnung(_daten(db, extern_erstellt=False, rechnungsnummer="AN-1", datum=date(2026, 4, 1),
+                           dokument_typ="Angebot"), db=db)  # Angebote zählen nicht
+    ergebnis = letzter_steuerfall(kunde.id, db=db)
+    assert ergebnis.ist_reverse_charge is True
+    assert ergebnis.ist_eu_lieferung is False
+    create_rechnung(_daten(db, extern_erstellt=False, rechnungsnummer="RE-2", datum=date(2026, 5, 1)), db=db)
+    assert letzter_steuerfall(kunde.id, db=db).ist_reverse_charge is False  # neueste Rechnung zählt

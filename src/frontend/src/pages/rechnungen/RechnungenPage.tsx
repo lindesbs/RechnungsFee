@@ -13,7 +13,7 @@ import {
   getKunden, getLieferanten, getKategorien, getUnternehmen, getApiBase, isTauri, openUrl, openInPdfWindow, downloadPdfForMail,
   getRechnungenExportUrl, korrigiereZahlung,
   getUstSaetze, getKassenstand,
-  uploadBeleg, setzeRechnungExternErstellt, getBelegUrl, getBelegPdfaUrl, deleteBeleg, analysiereRechnung, analysiereRechnungPfad,
+  uploadBeleg, setzeRechnungExternErstellt, getLetzterSteuerfall, getBelegUrl, getBelegPdfaUrl, deleteBeleg, analysiereRechnung, analysiereRechnungPfad,
   getBuchungsvorlage, erledigtVorlage,
   getMahnwesenEinstellungen, getRechnungMahnungen,
   getZugferdAnhaenge, uploadZugferdAnhang, deleteZugferdAnhang,
@@ -3076,11 +3076,28 @@ const kundeIdNum = partnerId ? parseInt(partnerId) : null
       zollPositionen.some((zp) => zp.ust_satz === p.ust_satz && zp.kategorie_id !== p.kategorie_id)
     )
   })()
+  // Issue #464: Steuerfall der letzten Rechnung dieses Kunden - bei Freitext-Positionen (kein
+  // Artikel-Typ, aus dem Ware/Dienstleistung ableitbar wäre) wird er übernommen, damit man ihn
+  // nicht bei jeder Rechnung neu anhaken muss. Bewusst kein eigenes Feld im Kundenstamm.
+  const { data: letzterSteuerfall } = useQuery({
+    queryKey: ['letzter-steuerfall', partnerId],
+    queryFn: () => getLetzterSteuerfall(parseInt(partnerId)),
+    enabled: typ === 'ausgang' && !initial && !!partnerId,
+    staleTime: 1000 * 60,
+  })
   useEffect(() => {
     if (initial || typ !== 'ausgang' || sonderfallManuell) return
     const artikelTypen = positionen.map((p) => p.art_typ).filter((t): t is ArtikelTyp => !!t)
     const hatWare = artikelTypen.includes('artikel')
     const hatDienstleistung = artikelTypen.some((t) => t === 'dienstleistung' || t === 'fremdleistung')
+    if (artikelTypen.length === 0 && letzterSteuerfall) {
+      // nur übernehmen, was beim aktuellen Kunden weiterhin zulässig ist
+      setIstReverseCharge(kundeEuFaehig && letzterSteuerfall.ist_reverse_charge)
+      setIstEuLieferung(kundeEuFaehig && letzterSteuerfall.ist_eu_lieferung)
+      setIstDrittlandLeistung(kundeDrittlandFaehig && letzterSteuerfall.ist_drittland_leistung)
+      setIstAusfuhrlieferung(kundeAusfuhrFaehig && letzterSteuerfall.ist_ausfuhrlieferung)
+      return
+    }
     if (kundeEuFaehig) {
       setIstEuLieferung(hatWare && !hatDienstleistung)
       setIstReverseCharge(hatDienstleistung && !hatWare)
@@ -3099,7 +3116,7 @@ const kundeIdNum = partnerId ? parseInt(partnerId) : null
     setIstEuLieferung(false)
     setIstDrittlandLeistung(false)
     setIstAusfuhrlieferung(false)
-  }, [kundeEuFaehig, kundeDrittlandFaehig, kundeAusfuhrFaehig, initial, typ, sonderfallManuell, positionen])
+  }, [kundeEuFaehig, kundeDrittlandFaehig, kundeAusfuhrFaehig, initial, typ, sonderfallManuell, positionen, letzterSteuerfall])
 
   // Warnung bei Reverse Charge/ig. Lieferung/Drittland-Dienstleistung/Ausfuhrlieferung, wenn die
   // Artikel-Typen der Positionen nicht dazu passen - nur relevant wenn eines der vier Flags aktiv

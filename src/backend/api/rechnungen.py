@@ -1396,6 +1396,40 @@ def offene_abschlaege(
     return ergebnis
 
 
+class LetzterSteuerfall(BaseModel):
+    ist_reverse_charge: bool = False
+    ist_eu_lieferung: bool = False
+    ist_drittland_leistung: bool = False
+    ist_ausfuhrlieferung: bool = False
+
+
+@router.get("/letzter-steuerfall", response_model=LetzterSteuerfall)
+def letzter_steuerfall(kunde_id: int = Query(...), db: Session = Depends(get_db)):
+    """Issue #464: Steuerfall (Reverse Charge, ig. Lieferung, Drittland, Ausfuhr) der letzten
+    Ausgangsrechnung dieses Kunden - das Formular übernimmt ihn bei neuen Rechnungen, statt dass
+    man ihn jedes Mal neu anhaken muss (bewusst ohne eigenes Kundenfeld). Muss vor
+    /{rechnung_id} registriert sein, sonst greift dort die int-Validierung."""
+    r = (
+        db.query(Rechnung)
+        .filter(
+            Rechnung.kunde_id == kunde_id,
+            Rechnung.typ == "ausgang",
+            Rechnung.dokument_typ.in_(["Rechnung", "Abschlagsrechnung"]),
+            Rechnung.storniert == False,  # noqa: E712
+        )
+        .order_by(Rechnung.datum.desc(), Rechnung.id.desc())
+        .first()
+    )
+    if not r:
+        return LetzterSteuerfall()
+    return LetzterSteuerfall(
+        ist_reverse_charge=bool(r.ist_reverse_charge),
+        ist_eu_lieferung=bool(r.ist_eu_lieferung),
+        ist_drittland_leistung=bool(r.ist_drittland_leistung),
+        ist_ausfuhrlieferung=bool(r.ist_ausfuhrlieferung),
+    )
+
+
 @router.get("/{rechnung_id}", response_model=RechnungResponse)
 def get_rechnung(rechnung_id: int, db: Session = Depends(get_db)):
     r = db.query(Rechnung).filter(Rechnung.id == rechnung_id).first()

@@ -1662,6 +1662,16 @@ export const getPaketDateiUrl = async (paketId: number, eintragId: number): Prom
 
 export const getRechnung = (id: number) => request<Rechnung>(`/rechnungen/${id}`)
 
+/** Issue #464: Steuerfall der letzten Ausgangsrechnung eines Kunden (wird bei neuen Rechnungen übernommen). */
+export type LetzterSteuerfall = {
+  ist_reverse_charge: boolean
+  ist_eu_lieferung: boolean
+  ist_drittland_leistung: boolean
+  ist_ausfuhrlieferung: boolean
+}
+export const getLetzterSteuerfall = (kundeId: number) =>
+  request<LetzterSteuerfall>(`/rechnungen/letzter-steuerfall?kunde_id=${kundeId}`)
+
 // Vorschau (Issue #332): berechnet Positions-/Kopfsummen ohne zu speichern - nutzt im Backend
 // exakt dieselbe Funktion wie createRechnung/updateRechnung. Das Formular soll selbst nicht mehr
 // rechnen, nur noch anzeigen was der Server zurückgibt.
