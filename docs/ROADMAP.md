@@ -91,7 +91,13 @@ kommen Rechnungen überwiegend per Mail. Zwei Zugangswege mit gemeinsamem Kern
 Wunsch von Peter1061, Recherche von herrschmidt (Issue #360): Kennzahlen nicht mehr in ELSTER abtippen.
 
 - [x] **Stufe 1 – Datei für den Upload in Mein ELSTER** (keine Registrierung, kein Zertifikat) – umgesetzt von herrschmidt (PR #460), Kennzahlen-Fehler davor behoben (#456 ZM, #457 KZ 43/87, #458 KZ 41, #459 §13b/Kleinunternehmer):
-  - **Offen:** ZM und KZ 21/41/43 werden nach Zahlungsdatum zugeordnet – für die ZM ist nach §18a Abs. 8 UStG vermutlich der Leistungs-/Rechnungsmonat maßgeblich (Rückfrage an herrschmidt in PR #460).
+- [ ] **Meldezeitraum ZM / KZ 21 / KZ 41 gesetzeskonform** (nach v0.7.4, Recherche herrschmidt in PR #460, am Gesetzestext geprüft): bisher nach Zahlungsdatum – unbezahlte EU-Lieferungen fehlen ganz. Laut §18a Abs. 8 und §18b UStG gilt, unabhängig von Ist-Versteuerung:
+  - **L / KZ 41** (ig. Lieferung): Monat der Rechnungsausstellung, spätestens Monat nach der Lieferung
+  - **S / KZ 21** (sonstige Leistung §3a Abs. 2): Monat der Ausführung (`leistung_bis` → `leistung_von` → Rechnungsdatum)
+  - Quelle wird die Rechnung (Netto), nicht die Zahlung; ZM und UStVA weiter aus derselben Quelle
+  - Korrekturen nach §17 (§18a Abs. 7, §18b Satz 4) als eigene Minusbeträge im Monat des Ereignisses: Storno, Gutschrift, Skonto, Forderungsausfall (`forderungsausfall_buchen`, #252 – dortige Begründung „nichts zu korrigieren“ gilt dann nicht mehr)
+  - Übergang per Stichtag wie beim Vorsteuer-Cutover (#338): Rechnungen ab Stichtag nach neuer Regel, ältere bleiben beim Zahlungsdatum – sonst Doppel- bzw. Fehlmeldungen. Vorschlag: Beginn eines Meldezeitraums (z. B. 01.01.2027)
+  - nicht betroffen: KZ 43 (Ausfuhr) und KZ 45 (Drittland) – nicht in §18b
   - UStVA als XML: nur der Nutzdatenteil `Anmeldungssteuern` (Namensraum
     `http://finkonsens.de/elster/elsteranmeldung/ustva/v20xx`, passendes `version`-Attribut je
     Jahresversion – häufigste Fehlerursache beim Import), Zeichensatz ISO-8859-15. Reine Ausgabe der
