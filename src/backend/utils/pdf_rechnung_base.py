@@ -302,6 +302,39 @@ class RechnungPDFBase(FPDF):
         self._sum_val_w = 0.0
 
     # -------------------------------------------------------------------------
+    # Seitenumbruch in der Positionstabelle (Issue #462)
+    # -------------------------------------------------------------------------
+
+    def _positionshoehe(self, beschreibungen: list[tuple[float, str]], zeilen_h: float,
+                        min_h: float, versatz: float, zusatz: float) -> float:
+        """Vorab berechnete Höhe einer Positionszeile: die längste mehrzeilige Spalte
+        (Beschreibung, ggf. Art.-Nr.) im aktuellen Font, mindestens min_h, plus Zusatz
+        (Rabatt-Unterzeile, Abstand)."""
+        zeilen = max(
+            (len(self.multi_cell(breite, zeilen_h, text or "", align="L", dry_run=True, output="LINES"))
+             for breite, text in beschreibungen),
+            default=1,
+        )
+        return max(min_h, versatz + zeilen * zeilen_h) + zusatz
+
+    def _umbruch_vor_position(self, hoehe: float, kopf_hoehe: float, vor_umbruch=None) -> bool:
+        """Fügt vor einer Position einen Seitenumbruch ein, wenn sie nicht mehr vollständig auf die
+        Seite passt - sonst landeten Beträge und Beschreibung auf verschiedenen Seiten (Issue #462:
+        Beträge auf Seite 1, Nummer auf Seite 2, Beschreibung auf Seite 3). Eine Position, die
+        selbst auf einer leeren Seite keinen Platz hätte, wird nicht verschoben (würde nur eine
+        leere Seite erzeugen) und bricht wie bisher innerhalb der Beschreibung um.
+        vor_umbruch (optional) läuft noch auf der alten Seite, z. B. um deren Tabellenrahmen zu schließen.
+        Gibt True zurück, wenn umgebrochen wurde - der Aufrufer zeichnet dann den Tabellenkopf neu."""
+        if self.get_y() + hoehe <= self.page_break_trigger:
+            return False
+        if hoehe > self.page_break_trigger - ADRESS_Y - kopf_hoehe:
+            return False
+        if vor_umbruch:
+            vor_umbruch()
+        self.add_page()  # header() setzt y auf ADRESS_Y
+        return True
+
+    # -------------------------------------------------------------------------
     # Header / Footer (identisch in allen Vorlagen)
     # -------------------------------------------------------------------------
 
