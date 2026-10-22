@@ -99,6 +99,13 @@ kommen Rechnungen überwiegend per Mail. Zwei Zugangswege mit gemeinsamem Kern
   Mail-Platzhalter, Dateinamen); bestehende Entwürfe behalten ihre Nummer (kein Doppel-Vergeben);
   Angebot/Auftrag/Lieferschein unverändert (Proforma-Entwürfe sind bereits ohne Nummer).
 - [ ] **Meldezeitraum ZM / KZ 21 / KZ 41** – siehe Abschnitt ELSTER-Export unten.
+- [ ] **Kleinunternehmer: Dienstleistungen an EU-Unternehmer** (Folge aus Issue #464) – das
+  Rechnungsformular blendet Reverse Charge/ig. Lieferung/Drittland/Ausfuhr bei §19 komplett aus
+  (`kundeEuFaehig` u. a. verlangen `!istKleinunternehmer`). Auch ein Kleinunternehmer erbringt eine
+  B2B-Dienstleistung an EU-Unternehmer aber im Empfängerland (§3a Abs. 2 UStG): Hinweis
+  „Steuerschuldnerschaft des Leistungsempfängers“ auf der Rechnung, USt-IdNr. nötig, Zusammenfassende
+  Meldung (ZM-Menü bisher für §19 gesperrt). Vor Umsetzung fachlich prüfen (u. a. ob eigene USt-IdNr.
+  Voraussetzung ist, Zusammenspiel mit §19-Hinweis auf der Rechnung, UStVA bleibt unberührt).
 
 ---
 
