@@ -406,6 +406,13 @@ def installiere_paket(daten: bytes) -> GefundenesPlugin:
     ID (Update) - ob es danach weiterläuft, entscheidet ermittle_status()."""
     if len(daten) > MAX_PAKET_BYTES:
         raise PluginFehler(f"Das Paket ist größer als {MAX_PAKET_BYTES // (1024 * 1024)} MB", status_code=413)
+    if daten.startswith(b"\0asm"):
+        raise PluginFehler(
+            "Du hast eine einzelne Wasm-Datei ausgewählt. Bitte wähle das .rfplugin-Paket "
+            "(z. B. python-kundenpruefung.rfplugin), das plugin.toml und plugin.wasm enthält. "
+            "Nur die Dateiendung zu ändern reicht nicht.",
+            status_code=422,
+        )
     try:
         zf = zipfile.ZipFile(io.BytesIO(daten))
     except zipfile.BadZipFile:

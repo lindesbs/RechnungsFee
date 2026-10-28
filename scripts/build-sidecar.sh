@@ -105,6 +105,7 @@ pyinstaller \
     --hidden-import plugins.wasm_pruefung \
     --hidden-import plugins.laufzeit \
     --hidden-import plugins.host_api \
+    --hidden-import plugins.schreiben \
     --hidden-import plugins.dto \
     --hidden-import plugins.ereignisse \
     --hidden-import pytesseract \

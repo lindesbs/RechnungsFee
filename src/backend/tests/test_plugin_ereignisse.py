@@ -199,8 +199,8 @@ def test_lesezugriff(sf):
         (lambda: host.list(ID, "customer", '{"limit": 1000}'), "validation-error", "limit"),
         (lambda: host.get(ID, "voucher", "1"), "not-found", "nicht gefunden"),
         (lambda: host.get(ID, "task", "1"), "validation-error", "noch nicht"),
-        (lambda: host.create(ID, "customer", "{}"), "validation-error", "noch nicht freigegeben"),
-        (lambda: host.delete(ID, "invoice", "1"), "validation-error", "noch nicht freigegeben"),
+        (lambda: host.create(ID, "customer", "{}"), "validation-error", "nur lesend"),
+        (lambda: host.delete(ID, "invoice", "1"), "validation-error", "nur lesend"),
     ]:
         with pytest.raises(HostApiFehler) as e:
             aufruf()

@@ -86,6 +86,24 @@ Build-Ausgaben, generierte Bindings und die Build-venv werden nicht versioniert.
 5. Prüfe das Verhalten anschließend beim Anlegen/Ändern eines Kunden in einem Testprofil.
    Der Testlauf selbst speichert keine Kundendaten.
 
+## Fehler beim Installieren
+
+Wähle **`dist/python-kundenpruefung.rfplugin`**, nicht `dist/plugin.wasm`.
+Das Wasm enthält den ausführbaren Code; das Paket enthält zusätzlich das Manifest
+mit Plugin-ID, API-Version und Rechten. Umbenennen von `.wasm` nach `.rfplugin`
+erzeugt kein gültiges Paket.
+
+Die Meldung „Die Datei ist kein gültiges Plugin-Paket (.rfplugin/.zip)“ bedeutet,
+dass der Upload nicht als ZIP gelesen werden konnte. Falls du bereits das richtige
+Paket gewählt hast, prüfe es im Repository-Hauptverzeichnis:
+
+```bash
+python3 -m zipfile -t examples/plugins/python-kundenpruefung/dist/python-kundenpruefung.rfplugin
+```
+
+Bei einem defekten Paket erneut `make plugins-python-build` ausführen und den
+Build vollständig abwarten, bevor du es auswählst.
+
 ## Aufbau und Erweiterung
 
 | Datei | Zweck |
@@ -130,7 +148,9 @@ Nicht erlaubte Feldänderungen werden vom Host verworfen und protokolliert.
 - Das Beispiel wurde mit **64 MB Speicherlimit** und dem unveränderten
   **50-ms-Pre-Hook-Budget** getestet. Dieses Budget teilen sich alle Pre-Hooks einer
   Transaktion; auf anderen Rechnern und mit mehreren Plugins erneut testen.
-- Host-API-Schreibzugriffe und Aufgaben (`task`) sind derzeit nicht freigegeben.
+- Host-API-Schreibzugriffe für Kunden, Artikel und Rechnungsentwürfe sind mit bestätigten
+  Rechten verfügbar: siehe [Host-API-Anleitung](../../../docs/plugin-host-api.md). Dieses
+  Prüfplugin benötigt sie nicht. Aufgaben (`task`) sind weiterhin nicht implementiert.
 - Es gibt keine persistenten Python-Globals zwischen Aufrufen: jeder Hook erhält eine
   neue Wasm-Instanz.
 

@@ -84,7 +84,6 @@ function AktivierenDialog({ plugin, onAbbrechen, onBestaetigen, laeuft, fehler }
   const erweitert = plugin.status === 'rechte_erweitert'
   const update = plugin.status === 'aktualisiert'
   const preHooks = plugin.hooks.filter(h => h.vor_dem_speichern)
-  // Host-API schreibt in dieser Version noch nicht (docs/plan-plugin-system.md, Meilenstein 2)
   const schreibrechte = Object.values(plugin.rechte?.entities ?? {}).some(a => a.some(x => x !== 'read'))
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-labelledby="plugin-dialog-titel">
@@ -123,8 +122,8 @@ function AktivierenDialog({ plugin, onAbbrechen, onBestaetigen, laeuft, fehler }
 
         {schreibrechte && (
           <p className="text-sm text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3">
-            Hinweis: Daten über die Plugin-Schnittstelle anlegen, ändern oder löschen ist in dieser Version noch nicht
-            freigegeben. Das Plugin kann diese Rechte derzeit nicht nutzen – sie gelten erst mit einem späteren Update.
+            Mit diesen Rechten kann das Plugin Kunden, Artikel oder Rechnungsentwürfe anlegen, ändern oder löschen.
+            Rechnungsabschlüsse und Belege bleiben geschützt. Aufgaben werden noch nicht unterstützt.
           </p>
         )}
 
@@ -582,6 +581,9 @@ export function PluginsPage() {
           <Icon name="refresh" size={16} /> Neu einlesen
         </button>
       </div>
+      <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+        Wähle das fertige <code>.rfplugin</code>- oder <code>.zip</code>-Paket mit Manifest, nicht die einzelne <code>plugin.wasm</code>.
+      </p>
       {data && (
         <p className="text-xs text-slate-400 dark:text-slate-500 mb-4 break-all">
           Plugin-Ordner: <span className="font-mono">{data.verzeichnis}</span>

@@ -33,13 +33,16 @@ from sqlalchemy.orm import Session
 from database.models import Rechnung, Rechnungsposition
 
 from . import dto, laufzeit
-from .host_api import LeseZugriff
+from .schreiben import DatenZugriff
 
 log = logging.getLogger("rechnungsfee.plugins")
 
 _SCHLUESSEL = "_plugin_ereignisse"     # session.info: {(entity, id): {"action", "vorher"}}
 _POST = "_plugin_post"                  # session.info: [(entity, action, dto)]
 _IN_ARBEIT = "_plugin_in_arbeit"
+_DATEIEN = "_plugin_dateien_nach_commit"
+_ZIELE = "_plugin_gepruefte_ziele"
+_BUDGET_ENDE = "_plugin_budget_ende"
 
 _unterdrueckt: contextvars.ContextVar[bool] = contextvars.ContextVar("plugins_unterdrueckt", default=False)
 
@@ -132,7 +135,7 @@ def _after_flush(session: Session, _ctx) -> None:
 
 
 def _before_commit(session: Session) -> None:
-    if not _aktiv(session):
+    if not _aktiv(session) or session.in_nested_transaction():
         return
     if session.new or session.dirty or session.deleted:
         session.flush()   # noch Ausstehendes erfassen (after_flush sammelt)
@@ -142,9 +145,10 @@ def _before_commit(session: Session) -> None:
 
     session.info[_IN_ARBEIT] = True
     try:
-        post = session.info.setdefault(_POST, [])
-        host = LeseZugriff(session=session)
+        session.info.setdefault(_POST, [])
+        host = DatenZugriff(session=session)
         start = time.perf_counter()
+        session.info[_BUDGET_ENDE] = start + laufzeit.PRE_HOOK_BUDGET_MS / 1000
         for (entity, obj_id), e in list(ereignisse.items()):
             action = e["action"]
             # Gemeinsames Budget für die ganze Transaktion (NFA-3)
@@ -155,8 +159,12 @@ def _before_commit(session: Session) -> None:
                 if vorher is None:
                     continue
                 if laufzeit.hat_hooks(entity, "delete", "before"):
-                    laufzeit.vor_aenderung(entity, "delete", vorher, host=host, budget_ms=max(rest, 0.001))
-                post.append((entity, "delete", vorher))
+                    session.info.setdefault(_ZIELE, set()).add((entity, obj_id))
+                    try:
+                        laufzeit.vor_aenderung(entity, "delete", vorher, host=host, budget_ms=max(rest, 0.001))
+                    finally:
+                        session.info[_ZIELE].discard((entity, obj_id))
+                merke_post(session, entity, "delete", vorher)
                 continue
 
             if not _relevant(entity, action):
@@ -167,16 +175,46 @@ def _before_commit(session: Session) -> None:
             vorher = dto.als_dto(obj)
             nachher = vorher
             if laufzeit.hat_hooks(entity, action, "before"):
-                nachher = laufzeit.vor_aenderung(entity, action, vorher, host=host, budget_ms=max(rest, 0.001))
+                session.info.setdefault(_ZIELE, set()).add((entity, obj_id))
+                try:
+                    nachher = laufzeit.vor_aenderung(entity, action, vorher, host=host, budget_ms=max(rest, 0.001))
+                finally:
+                    session.info[_ZIELE].discard((entity, obj_id))
             if nachher != vorher:
                 _uebernehme(entity, action, obj, vorher, nachher)
-            post.append((entity, action, dto.als_dto(obj) if nachher != vorher else vorher))
+            merke_post(session, entity, action, dto.als_dto(obj) if nachher != vorher else vorher)
         session.flush()   # vom Plugin übernommene Änderungen schreiben, solange _IN_ARBEIT gilt
     except BaseException:
         session.info.pop(_POST, None)
         raise
     finally:
         session.info.pop(_IN_ARBEIT, None)
+        session.info.pop(_BUDGET_ENDE, None)
+        session.info.pop(_ZIELE, None)
+
+
+def merke_post(session, entity, action, payload):
+    # Vorfahren des auslösenden Plugins über die Commit-/Thread-Grenze mitnehmen.
+    session.info.setdefault(_POST, []).append((entity, action, payload, laufzeit._kontext.get()))
+
+
+def host_vor_aenderung(session, entity, action, obj, host):
+    vorher = dto.als_dto(obj)
+    ziel = (entity, obj.id)
+    ziele = session.info.setdefault(_ZIELE, set())
+    ziele.add(ziel)
+    eigenes_budget = _BUDGET_ENDE not in session.info
+    if eigenes_budget:
+        session.info[_BUDGET_ENDE] = time.perf_counter() + laufzeit.PRE_HOOK_BUDGET_MS / 1000
+    try:
+        rest = (session.info[_BUDGET_ENDE] - time.perf_counter()) * 1000
+        nachher = laufzeit.vor_aenderung(entity, action, vorher, host=host, budget_ms=max(rest, 0.001))
+        if action != "delete" and nachher != vorher:
+            _uebernehme(entity, action, obj, vorher, nachher)
+    finally:
+        ziele.discard(ziel)
+        if eigenes_budget:
+            session.info.pop(_BUDGET_ENDE, None)
 
 
 def _uebernehme(entity: str, action: str, obj, vorher: dict, nachher: dict) -> None:
@@ -196,20 +234,34 @@ def _uebernehme(entity: str, action: str, obj, vorher: dict, nachher: dict) -> N
 
 
 def _after_commit(session: Session) -> None:
+    if session.in_nested_transaction():
+        return  # RELEASE SAVEPOINT ist noch kein dauerhafter Commit.
+    dateien = session.info.pop(_DATEIEN, [])
+    if dateien:
+        from api.rechnungen import _dateien_entfernen
+        _dateien_entfernen(dateien)
     post = session.info.pop(_POST, None)
     if not post or _unterdrueckt.get():
         return
-    from database.connection import SessionLocal
+    for entity, action, payload, kontext in post:
+        token = laufzeit._kontext.set(kontext)
+        try:
+            laufzeit.nach_aenderung(entity, action, payload,
+                host_factory=lambda: DatenZugriff(session_factory=laufzeit._sessions()))
+        finally:
+            laufzeit._kontext.reset(token)
 
-    for entity, action, payload in post:
-        laufzeit.nach_aenderung(entity, action, payload,
-                                host_factory=lambda: LeseZugriff(session_factory=SessionLocal))
+
+def _after_rollback(session: Session, transaction=None) -> None:
+    if session.in_nested_transaction() or (transaction is not None and transaction.parent is not None):
+        return  # Einen gescheiterten Host-Aufruf stellt dessen Savepoint-Guard wieder her.
+    for key in (_SCHLUESSEL, _POST, _IN_ARBEIT, _DATEIEN, _ZIELE, _BUDGET_ENDE):
+        session.info.pop(key, None)
 
 
-def _after_rollback(session: Session, *_args) -> None:
-    session.info.pop(_SCHLUESSEL, None)
-    session.info.pop(_POST, None)
-    session.info.pop(_IN_ARBEIT, None)
+def registrieren_session(session):
+    if _before_commit not in list(session.dispatch.before_commit):
+        registrieren(session)
 
 
 _MARKIERUNG = "_rechnungsfee_plugin_pipeline"

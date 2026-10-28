@@ -16,6 +16,7 @@ Hier ist das vollständige, konsolidierte Lastenheft im Markdown-Format.
 
 Ein baubares Python-Beispiel mit Tests und Installationsanleitung findest du unter
 [examples/plugins/python-kundenpruefung](../examples/plugins/python-kundenpruefung/README.md).
+Schreibzugriffe, Rechte und Transaktionen beschreibt die [Host-API-Anleitung](plugin-host-api.md).
 Der aktuelle Implementierungsstand und die Einschränkungen stehen im
 [Umsetzungsplan](plan-plugin-system.md).
 

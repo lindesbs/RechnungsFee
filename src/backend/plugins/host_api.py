@@ -1,13 +1,13 @@
 """
 Host-API: was Plugins über `rechnungsfee:plugin/host-api` aufrufen können.
 
-Phase 3 (docs/plan-plugin-system.md) legt hier nur den Vertrag fest:
+Gemeinsamer Vertrag und lesender Adapter (docs/plan-plugin-system.md):
 - `HostApi` beschreibt, was eine Implementierung liefern muss (Phase 4: echter, GoBD-sicherer
   Datenzugriff über DTOs).
 - `pruefe_recht()` setzt die vom Nutzer BESTÄTIGTEN Rechte durch - unabhängig davon, welche
   Implementierung dahinter steckt. Die Laufzeit ruft das vor jeder Weiterleitung auf.
-- `KeinDatenzugriff` ist die Standard-Implementierung, solange Phase 4 fehlt, und wird auch bei
-  Testläufen aus den Einstellungen verwendet.
+- `KeinDatenzugriff` sperrt echte Daten bei Testläufen aus den Einstellungen.
+- `plugins.schreiben.DatenZugriff` ergänzt transaktionale create/update/delete-Aufrufe.
 
 Fehler werden als `HostApiFehler(art, meldung)` geworfen; `art` entspricht den Fällen der WIT-
 Variante `api-error`: unauthorized | not-found | validation-error | internal-error.
@@ -69,8 +69,8 @@ class LeseZugriff:
     auch die noch nicht festgeschriebenen Änderungen dieser Transaktion), oder
     `session_factory`: für Post-Hooks im Hintergrund, eine kurze eigene Session je Aufruf.
 
-    Schreiben (create/update/delete) ist in dieser Version bewusst noch nicht freigegeben
-    (Meilenstein 2: nur lesen + vor dem Speichern prüfen/ändern, docs/plan-plugin-system.md).
+    Dieser Adapter bleibt ausdrücklich nur lesend. Die App verwendet den erweiterten
+    Adapter `plugins.schreiben.DatenZugriff` für transaktionale Schreibzugriffe.
     """
 
     def __init__(self, session=None, session_factory=None):
@@ -134,7 +134,7 @@ class LeseZugriff:
         self._definition(entity)
         raise HostApiFehler(
             "validation-error",
-            "Schreiben über die Host-API ist in dieser RechnungsFee-Version noch nicht freigegeben",
+            "Dieser Host-Adapter ist nur lesend; Schreibzugriffe benötigen DatenZugriff",
         )
 
     create = update = delete = _schreiben

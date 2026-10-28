@@ -1,7 +1,7 @@
 # Ablaufplan: Integration des Wasm-Plugin-Systems
 
 **Grundlage:** [`plugin-system.md`](plugin-system.md) (Lastenheft v1.0.0)
-**Status:** Phase 0–5 umgesetzt (Meilenstein 2: lesen + vor dem Speichern prüfen/ändern), 2026-10-28. Offen: Schreiben per Host-API, Aufgaben (Phase 6), Release (Phase 7)
+**Status:** Phase 0–5 einschließlich Host-API-Schreibzugriffen umgesetzt, 2026-10-28. Offen: Aufgaben und Rust-SDK (Phase 6), Release (Phase 7)
 **Stand:** 2026-10-28
 
 ---
@@ -145,12 +145,18 @@ Festgelegtes Verhalten:
 Messwerte (Linux, warm): Pre-Hook-Kette mit einem Plugin inkl. Registry-Abfrage 1,4 ms; Testlauf im gefrorenen
 Sidecar 0,8–1,6 ms, Timeout greift nach ~58 ms. Tests: `tests/test_plugin_laufzeit.py` (22 Tests, 5× hintereinander stabil).
 
-### Phase 4 – umgesetzt (lesend)
+### Phase 4 – umgesetzt (Lesen und Schreiben)
 
 | Datei | Inhalt |
 |---|---|
 | `src/backend/plugins/dto.py` | Eingefrorene V1-DTOs mit `"_schema": "<entity>@1"`: `customer` (Kunde), `invoice` (Rechnung inkl. Positionen – umfasst alle Zeilen von `rechnungen`, also auch Angebote, Aufträge, Lieferscheine, Proforma, Gutschriften und Eingangsrechnungen; unterscheidbar über `typ`/`dokument_typ`), `article` (Artikel), `voucher` (Beleg) |
-| `src/backend/plugins/host_api.py` | `LeseZugriff`: `get`/`list` (Gleichheitsfilter auf DTO-Felder, `limit` ≤ 100, `offset`); create/update/delete antworten „noch nicht freigegeben“ |
+| `src/backend/plugins/host_api.py` | `LeseZugriff`: `get`/`list` (Gleichheitsfilter auf DTO-Felder, `limit` ≤ 100, `offset`) |
+
+Schreibzugriffe stehen über `plugins/schreiben.py::DatenZugriff` bereit: Kunden,
+Artikel und Rechnungsentwürfe mit gemeinsam genutzten CRUD-Helfern, Savepoints,
+Rechteprüfung, Audit und verschachtelten Hooks. Pre-Hook-Schreibzugriffe rollen mit
+der äußeren Transaktion zurück; Post-Hooks committen je Host-Aufruf.
+Details und Python-Aufrufe: [Host-API für Entwickler](plugin-host-api.md).
 
 - **`voucher` = Beleg** (Entscheidung Stefan): die hochgeladene Belegdatei aus `belege`, nur Metadaten
   (`original_name`, `mime_type`, `dateigroesse`, `sha256`, `hochgeladen_am`) – interne Dateipfade und Inhalt nicht.
@@ -187,7 +193,7 @@ Sidecar 0,8–1,6 ms, Timeout greift nach ~58 ms. Tests: `tests/test_plugin_lauf
 
 Ende-zu-Ende geprüft (uvicorn und gefrorener Sidecar): Kunde anlegen/ändern mit Abbruch → 422, Datensatz
 unverändert; erlaubte Feldänderung übernommen; Rechnung anlegen + finalisieren mit aktiven Plugins; Rechnungs-Pre-Hook
-bricht ab; Plugin-Änderung am Entwurf übernommen. Einstellungsseite: Hinweis, dass Schreibrechte noch nicht nutzbar sind.
+bricht ab; Plugin-Änderung am Entwurf übernommen. Einstellungsseite: Hinweis auf nutzbare Schreibrechte und geschützte Entitäten.
 
 Tests: `tests/test_plugin_ereignisse.py` (20 Tests), insgesamt 91 Plugin-Tests, 15× hintereinander stabil.
 
@@ -202,8 +208,8 @@ Aufgaben-Referenzplugin aus Phase 6 bleiben offen.
 
 ### Nächste Schritte
 
-- **Schreiben per Host-API** (create/update/delete) über die Service-Funktionen der Router – inkl. Rekursionsschutz
-  (bereits in der Laufzeit vorhanden) und Protokollierung jeder Plugin-Schreibaktion.
+- **Erledigt: Host-API-Schreiben** (`create`/`update`/`delete`) für Kunden, Artikel und Rechnungsentwürfe,
+  inklusive gemeinsamer Core-Logik, Transaktions-/Dateisicherheit, Audit und Rekursionsschutz.
 - **Phase 6:** Aufgaben-Tabelle (`task`), Referenz-Plugin in Rust, SDK-Vorlage.
 - **Offene Frage 3** (Fehler im Pre-Hook → Speichern abbrechen?) steht weiter auf „abbrechen“ (`BEI_FEHLER_ABBRECHEN`).
 - Vor einem Release: CI-Build Windows/macOS mit Plugin-Smoke-Test.

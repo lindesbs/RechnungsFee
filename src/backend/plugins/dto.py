@@ -128,7 +128,7 @@ def als_dto(obj) -> dict:
 
 def ist_aenderbar(obj) -> tuple[bool, str | None]:
     """Darf ein Plugin dieses Objekt überhaupt verändern? (GoBD)"""
-    if isinstance(obj, Rechnung) and (not obj.ist_entwurf or obj.immutable or obj.storniert):
+    if isinstance(obj, Rechnung) and (not obj.ist_entwurf or obj.immutable or obj.storniert or obj.ausgegeben):
         return False, "finalisierte Dokumente sind unveränderlich (GoBD)"
     if isinstance(obj, Beleg):
         return False, "Belege sind unveränderlich (GoBD)"

@@ -415,6 +415,15 @@ def test_installieren_lehnt_inkompatible_wasm_ab(plugin_dir):
     assert e.value.status_code == 422 and "netz" in e.value.details[0]
 
 
+def test_installieren_einzelne_wasm_erklaert_paketauswahl(plugin_dir):
+    with pytest.raises(registry.PluginFehler) as e:
+        registry.installiere_paket(TESTPLUGIN)
+    assert e.value.status_code == 422
+    assert "einzelne Wasm-Datei" in e.value.meldung
+    assert "python-kundenpruefung.rfplugin" in e.value.meldung
+    assert not list(plugin_dir.iterdir())
+
+
 def test_installieren_kein_zip(plugin_dir):
     with pytest.raises(registry.PluginFehler) as e:
         registry.installiere_paket(b"kein zip")

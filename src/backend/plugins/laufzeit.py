@@ -180,7 +180,8 @@ class _Hintergrund:
             if self._thread is None:
                 self._thread = threading.Thread(target=self._lauf, name="plugin-hintergrund", daemon=True)
                 self._thread.start()
-        self._warteschlange.put(fn)
+        kontext = contextvars.copy_context()
+        self._warteschlange.put(lambda: kontext.run(fn))
 
     def _lauf(self):
         while True:
