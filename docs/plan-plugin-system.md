@@ -191,6 +191,15 @@ bricht ab; Plugin-Änderung am Entwurf übernommen. Einstellungsseite: Hinweis, 
 
 Tests: `tests/test_plugin_ereignisse.py` (20 Tests), insgesamt 91 Plugin-Tests, 15× hintereinander stabil.
 
+### Python-Beispiel
+
+Unter [examples/plugins/python-kundenpruefung](../examples/plugins/python-kundenpruefung/README.md)
+liegt ein baubares Python-Prüfplugin: `componentize-py` übersetzt den Gast in eine
+Wasm-Component ohne WASI-Imports. Enthalten sind Manifest, Paketierung, lokale
+Unit-Tests und ein Smoke-Test gegen die unveränderte Sandbox (64 MB / 50 ms).
+Damit gibt es eine Python-Einstiegsanleitung; die Rust-SDK-Vorlage und das
+Aufgaben-Referenzplugin aus Phase 6 bleiben offen.
+
 ### Nächste Schritte
 
 - **Schreiben per Host-API** (create/update/delete) über die Service-Funktionen der Router – inkl. Rekursionsschutz

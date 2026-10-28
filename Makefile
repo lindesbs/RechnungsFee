@@ -4,6 +4,8 @@ SHELL := /bin/bash
 PYTHON ?= python3.12
 NPM ?= npm
 CARGO ?= cargo
+PYTHON_PLUGIN := examples/plugins/python-kundenpruefung
+PLUGIN_PYTHON := $(abspath $(PYTHON_PLUGIN)/.venv/bin/python)
 BACKEND := src/backend
 FRONTEND := src/frontend
 VENV := $(BACKEND)/.venv
@@ -29,7 +31,8 @@ TAURI_ARGS ?=
  build-sidecar build-desktop-dev build-desktop-prod test test-backend test-plugins \
  test-rust test-debug lint lint-frontend lint-rust check check-frontend check-rust \
  format-rust plugins-build clean clean-frontend clean-backend clean-rust \
- build\:dev build\:prod build-appimage build\:appimage
+ build\:dev build\:prod build-appimage build\:appimage \
+ plugins-python-setup plugins-python-build plugins-python-test
 
 help: ## Alle verfügbaren Befehle anzeigen
 	@printf 'RechnungsFee – Entwicklung und Build (Bash / GNU Make)\n\n'
@@ -132,6 +135,17 @@ check-rust: ## Rust mit Clippy prüfen (Sidecar und Systembibliotheken erforderl
 	$(CARGO) clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 format-rust: ## Rust-Quelltext formatieren
 	$(CARGO) fmt --manifest-path src-tauri/Cargo.toml
+
+plugins-python-setup: ## Separate Python-Buildumgebung für das Beispiel-Plugin installieren
+	$(PYTHON) -m venv $(PYTHON_PLUGIN)/.venv
+	"$(PLUGIN_PYTHON)" -m pip install -r $(PYTHON_PLUGIN)/requirements-build.txt
+
+plugins-python-build: ## Python-Beispiel als Wasm und .rfplugin bauen (vorher plugins-python-setup)
+	"$(PLUGIN_PYTHON)" $(PYTHON_PLUGIN)/build.py
+
+plugins-python-test: plugins-python-build ## Python-Beispiel lokal und in der echten Wasm-Sandbox testen
+	"$(PLUGIN_PYTHON)" -m unittest discover -s $(PYTHON_PLUGIN) -p test_pruefung.py -v
+	"$(BACKEND_PYTHON)" $(PYTHON_PLUGIN)/smoke_test.py
 
 plugins-build: ## Wasm-Test-Fixtures neu bauen (clang, wit-bindgen und wasm-tools erforderlich)
 	bash $(BACKEND)/tests/fixtures/plugins/quelle/build.sh

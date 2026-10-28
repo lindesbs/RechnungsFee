@@ -14,6 +14,11 @@ Hier ist das vollständige, konsolidierte Lastenheft im Markdown-Format.
 
 ---
 
+Ein baubares Python-Beispiel mit Tests und Installationsanleitung findest du unter
+[examples/plugins/python-kundenpruefung](../examples/plugins/python-kundenpruefung/README.md).
+Der aktuelle Implementierungsstand und die Einschränkungen stehen im
+[Umsetzungsplan](plan-plugin-system.md).
+
 ## 1. Zielsetzung & Gesamtsystem
 
 Das Ziel dieses Vorhabens ist die Entwicklung einer modularen Plugin-Schnittstelle für RechnungsFee auf Basis von **WebAssembly (Wasm)**.

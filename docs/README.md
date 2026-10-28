@@ -63,6 +63,7 @@ Diese Dokumentation beschreibt alle Anforderungen, Konzepte und Entscheidungen f
 ### Für Entwickler
 
 - **App lokal bauen (AppImage):** Siehe [build-lokal.md](build-lokal.md)
+- **Python-Plugin entwickeln:** [Baubares Beispiel mit Anleitung](../examples/plugins/python-kundenpruefung/README.md)
 - **Plugin-System:** Siehe [plugin-system.md](plugin-system.md) (Lastenheft), [plan-plugin-system.md](plan-plugin-system.md) (Umsetzung)
 - **Datenbank-Schema:** Siehe [06-stammdaten.md](06-stammdaten.md), [02-kassenbuch.md](02-kassenbuch.md)
 - **API-Anforderungen:** Siehe [03-bank-integration.md](03-bank-integration.md), [08-import.md](08-import.md)
