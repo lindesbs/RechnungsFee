@@ -55,6 +55,7 @@ app.add_middleware(
 
 # Issue #476: angehängten Dateinamen ("/_datei/<name>") vor dem Routing entfernen
 from utils.pdf_dateiname_pfad import PdfDateinameMiddleware  # noqa: E402
+from utils import backup_metadata, backup_zip  # noqa: E402
 app.add_middleware(PdfDateinameMiddleware)
 
 app.include_router(setup.router)
@@ -143,39 +144,6 @@ def _encrypt_bytes(data: bytes, passwort: str) -> bytes:
     return salt + nonce + AESGCM(key).encrypt(nonce, data, None)
 
 
-def _erstelle_vollbackup_zip() -> bytes:
-    """ZIP mit WAL-sicherem DB-Snapshot + Uploads-Ordner (Belege, PDFs)."""
-    import io
-    import zipfile
-    import tempfile
-
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # DB: WAL-sicherer Snapshot über sqlite3.backup()
-        fd, tmp = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        try:
-            src = sqlite3.connect(str(DB_PATH))
-            dst = sqlite3.connect(tmp)
-            try:
-                src.backup(dst)
-            finally:
-                dst.close()
-                src.close()
-            zf.write(tmp, "rechnungsfee.db")
-        finally:
-            os.unlink(tmp)
-
-        # Uploads: Belege, PDFs, OCR-Dateien
-        uploads_dir = APP_DATA_DIR / "uploads"
-        if uploads_dir.exists():
-            for f in sorted(uploads_dir.rglob("*")):
-                if f.is_file():
-                    zf.write(f, f"uploads/{f.relative_to(uploads_dir).as_posix()}")
-
-    return buf.getvalue()
-
-
 # Issue #442: nur von RechnungsFee selbst geschriebene externe Backups rotieren - fremde Dateien
 # im selben Zielordner (z.B. ein NAS-Sammelordner) bleiben unangetastet
 _EXTERN_BACKUP_RE = re.compile(r"^rechnungsfee_\d{8}_\d{6}\.zip\.enc$")
@@ -248,7 +216,7 @@ def _backup_smb(smb_url: str, dateiname: str, daten: bytes,
 def backup_erstellen():
     """Backup bei App-Ende – WAL-sicher lokal (max. 5), optional AES-256-GCM auf externen Pfaden."""
     try:
-        _backup_datenbank()
+        _backup_datenbank("exit")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -283,7 +251,7 @@ def backup_erstellen():
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     dateiname = f"rechnungsfee_{ts}.zip.enc"
     try:
-        zip_bytes = _erstelle_vollbackup_zip()
+        zip_bytes, manifest = backup_zip.erstelle_backup_zip(DB_PATH, APP_DATA_DIR, "exit")
         enc_bytes = _encrypt_bytes(zip_bytes, passwort)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Backup-ZIP-Erstellung fehlgeschlagen: {e}")
@@ -311,6 +279,8 @@ def backup_erstellen():
                     (ziel_dir / alt).unlink()
                     print(f"[Backup] Altes externes Backup gelöscht: {pfad}/{alt}")
             print(f"[Backup] Extern gesichert: {pfad}/{dateiname}")
+            backup_zip.notiere_backup(APP_DATA_DIR, manifest, dateiname=dateiname, ort="extern",
+                                      ziel=pfad, umfang="voll", groesse=len(enc_bytes))
         except Exception as e:
             fehler.append(f"{pfad}: {e}")
             print(f"[Backup] Externer Backup-Fehler ({pfad}): {e}")
@@ -318,17 +288,8 @@ def backup_erstellen():
     return {"ok": True, "extern_konfiguriert": True, "fehler": fehler or None, "uebersprungen": uebersprungen or None}
 
 
-@app.post("/api/backup/wiederherstellen")
-async def backup_wiederherstellen(
-    datei: UploadFile = File(...),
-    passwort: str = Form(default=""),
-):
-    """Nimmt .zip (unverschlüsselt) oder .zip.enc (AES-256) entgegen, validiert und speichert als Pending-Marker."""
-    import io
-    import zipfile
-    filename = datei.filename or ""
-    content  = await datei.read()
-
+def _lies_backup_upload(filename: str, content: bytes, passwort: str) -> bytes:
+    """Liefert die ZIP-Bytes eines hochgeladenen .zip oder .zip.enc."""
     if filename.endswith(".zip.enc"):
         if not passwort:
             raise HTTPException(status_code=400, detail="Verschlüsseltes Backup (.zip.enc) erfordert ein Passwort")
@@ -338,13 +299,60 @@ async def backup_wiederherstellen(
             raise HTTPException(status_code=400, detail="Entschlüsselung fehlgeschlagen – falsches Passwort?")
     elif not filename.endswith(".zip"):
         raise HTTPException(status_code=400, detail="Nur .zip oder .zip.enc Dateien werden akzeptiert")
+    return content
 
+
+def _pruefe_backup(content: bytes) -> backup_metadata.Pruefergebnis:
+    """Prüft ein Backup gegen dieses Profil, ohne etwas zu schreiben."""
+    import io
+    import zipfile
+    verlauf = backup_metadata.lies_verlauf(APP_DATA_DIR / "backups" / backup_metadata.VERLAUF_DATEI)
+    neueste = backup_metadata.neueste_vollsicherung(verlauf)
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as zf:
-            if "rechnungsfee.db" not in zf.namelist():
-                raise HTTPException(status_code=400, detail="Ungültiges Backup: rechnungsfee.db nicht gefunden")
+            ergebnis = backup_metadata.pruefe_archiv(
+                zf,
+                schema_version=SCHEMA_VERSION,
+                profile_id=backup_metadata.lies_profile_id(APP_DATA_DIR),
+                neuester_zeitpunkt=neueste["completed_at"] if neueste else None,
+            )
+            hat_sqlite_db = "rechnungsfee.db" in zf.namelist()
     except zipfile.BadZipFile:
         raise HTTPException(status_code=400, detail="Ungültige ZIP-Datei (oder falsches Passwort)")
+    # Portable Backups erkennt das Kernmodul, einspielen lassen sie sich hier noch nicht.
+    if not hat_sqlite_db and not any(b["code"] == "keine_datenbank" for b in ergebnis.blockaden):
+        ergebnis.blockaden.append({"code": "keine_datenbank", "meldung": "Das Backup enthält keine Datenbank."})
+    return ergebnis
+
+
+@app.post("/api/backup/inspect")
+async def backup_inspect(
+    datei: UploadFile = File(...),
+    passwort: str = Form(default=""),
+):
+    """Prüft ein Backup vor dem Einspielen und schreibt dabei nichts."""
+    filename = datei.filename or ""
+    ergebnis = _pruefe_backup(_lies_backup_upload(filename, await datei.read(), passwort))
+    manifest = ergebnis.manifest
+    return {
+        "metadaten": {k: v for k, v in manifest.items() if k != "integrity"} if manifest else None,
+        "blockaden": ergebnis.blockaden,
+        "warnungen": ergebnis.warnungen,
+        "infos": ergebnis.infos,
+        "verschluesselt": filename.endswith(".zip.enc"),
+    }
+
+
+@app.post("/api/backup/wiederherstellen")
+async def backup_wiederherstellen(
+    datei: UploadFile = File(...),
+    passwort: str = Form(default=""),
+):
+    """Nimmt .zip (unverschlüsselt) oder .zip.enc (AES-256) entgegen, validiert und speichert als Pending-Marker."""
+    content = _lies_backup_upload(datei.filename or "", await datei.read(), passwort)
+    ergebnis = _pruefe_backup(content)
+    if ergebnis.blockaden:
+        raise HTTPException(status_code=400, detail=" ".join(b["meldung"] for b in ergebnis.blockaden))
 
     RESTORE_MARKER_ZIP.write_bytes(content)
     return {"ok": True, "neustart_erforderlich": True}
@@ -365,11 +373,12 @@ def _ist_systemlaufwerk(pfad: str) -> bool:
     return False
 
 
-def _backup_datenbank() -> None:
-    """Erstellt ein WAL-sicheres Backup der DB vor Migrationen (max. 5 Backups)."""
+def _backup_datenbank(backup_type: str) -> None:
+    """Erstellt ein WAL-sicheres Backup der DB (max. 5 Backups) und trägt es in den Verlauf ein."""
     backup_dir = DB_PATH.parent / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
 
+    created_at = backup_zip.jetzt_utc()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = backup_dir / f"rechnungsfee_{ts}.db"
 
@@ -381,6 +390,7 @@ def _backup_datenbank() -> None:
         dst.close()
         src.close()
     print(f"[Migration] DB-Backup: {backup_path.name}")
+    backup_zip.notiere_snapshot(backup_path, DB_PATH.parent, backup_type, created_at)
 
     # Rotation: max. 5 Backups behalten, älteste löschen
     backups = sorted(backup_dir.glob("rechnungsfee_*.db"))
@@ -409,10 +419,14 @@ def _prüfe_wiederherstellung() -> None:
     import zipfile
     print("[Wiederherstellung] Pending-Marker gefunden – stelle wieder her …")
     try:
-        _backup_datenbank()  # Sicherheitsbackup der aktuellen DB
+        _backup_datenbank("pre_restore")  # Sicherheitsbackup der aktuellen DB
 
         if marker_zip.exists():
             with zipfile.ZipFile(marker_zip, "r") as zf:
+                # Vor dem ersten Schreibzugriff prüfen, sonst bliebe ein halber Restore zurück.
+                pruefung = backup_metadata.pruefe_archiv(zf, schema_version=SCHEMA_VERSION)
+                if pruefung.blockaden:
+                    raise ValueError(" ".join(b["meldung"] for b in pruefung.blockaden))
                 names = zf.namelist()
                 if "rechnungsfee.db" in names:
                     zf.extract("rechnungsfee.db", APP_DATA_DIR)
@@ -430,6 +444,9 @@ def _prüfe_wiederherstellung() -> None:
                         ziel.parent.mkdir(parents=True, exist_ok=True)
                         ziel.write_bytes(zf.read(name))
                     print(f"[Wiederherstellung] {len(upload_entries)} Belege wiederhergestellt")
+                profile_id = (pruefung.manifest or {}).get("profile_id")
+                if isinstance(profile_id, str) and profile_id:
+                    backup_metadata.setze_profile_id(APP_DATA_DIR, profile_id)
             marker_zip.unlink()
 
         elif marker_db.exists():
@@ -482,13 +499,13 @@ def _run_migrations() -> None:
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='kassenbuch'"
         )).scalar()
     if version == 0 and not hat_kassenbuch:
-        _backup_datenbank()
+        _backup_datenbank("pre_migration")
         with engine.connect() as conn:
             conn.execute(text(f"PRAGMA user_version = {SCHEMA_VERSION}"))
             conn.commit()
         return
 
-    _backup_datenbank()
+    _backup_datenbank("pre_migration")
 
     with engine.connect() as conn:
         if version < 1:

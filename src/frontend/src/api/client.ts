@@ -1093,10 +1093,49 @@ export async function uploadBackupWiederherstellen(datei: File, passwort?: strin
   }
 }
 
+export type BackupHinweis = { code: string; meldung: string }
+
+export type BackupPruefung = {
+  metadaten: {
+    app_version: string
+    schema_version: number
+    profile_name?: string
+    backup_type: string
+    completed_at: string
+    contents: { uploads?: boolean; file_count?: number }
+  } | null
+  blockaden: BackupHinweis[]
+  warnungen: BackupHinweis[]
+  infos: BackupHinweis[]
+  verschluesselt: boolean
+}
+
+export async function pruefeBackup(datei: File, passwort?: string): Promise<BackupPruefung> {
+  const base = await getBaseUrl()
+  const form = new FormData()
+  form.append('datei', datei)
+  if (passwort) form.append('passwort', passwort)
+  const res = await fetch(`${base}/backup/inspect`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail ?? 'Prüfung fehlgeschlagen')
+  }
+  return res.json()
+}
+
 export type BackupEintrag = {
   dateiname: string
   timestamp: string | null
   groesse: number
+  backup_type: string | null
+  umfang: string | null
+  ort: string
+  ziel: string | null
+  app_version: string | null
+  schema_version: number | null
+  hat_metadaten: boolean
+  wiederherstellbar: boolean
+  ist_neueste_vollsicherung: boolean
 }
 
 export const getBackupListe = () => request<BackupEintrag[]>('/backup/liste')

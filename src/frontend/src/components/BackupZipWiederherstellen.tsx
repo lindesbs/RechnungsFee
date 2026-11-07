@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react'
-import { isTauri, uploadBackupWiederherstellen } from '../api/client'
+import { isTauri, pruefeBackup, uploadBackupWiederherstellen } from '../api/client'
+import type { BackupPruefung } from '../api/client'
+import { backupTypLabel } from '../utils/backupLabels'
 
 const inputCls = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100 dark:placeholder-slate-400"
 
@@ -14,17 +16,37 @@ export function BackupZipWiederherstellen() {
   const [datei, setDatei] = useState<File | null>(null)
   const [passwort, setPasswort] = useState('')
   const [zeigPasswort, setZeigPasswort] = useState(false)
-  const [status, setStatus] = useState<'idle' | 'uploading' | 'bereit' | 'err'>('idle')
+  const [status, setStatus] = useState<'idle' | 'prueft' | 'uploading' | 'bereit' | 'err'>('idle')
   const [fehler, setFehler] = useState<string | null>(null)
+  const [pruefung, setPruefung] = useState<BackupPruefung | null>(null)
+  const [warnungenBestaetigt, setWarnungenBestaetigt] = useState(false)
 
   const istVerschluesselt = datei?.name.endsWith('.zip.enc') ?? false
-  const kannWiederherstellen = !!datei && (!istVerschluesselt || !!passwort)
+  const kannPruefen = !!datei && (!istVerschluesselt || !!passwort)
+  const hatWarnungen = (pruefung?.warnungen.length ?? 0) > 0
+  const kannWiederherstellen = !!pruefung && pruefung.blockaden.length === 0 && (!hatWarnungen || warnungenBestaetigt)
   const neustartBereit = status === 'bereit'
+
+  function setzePruefungZurueck() {
+    setPruefung(null); setWarnungenBestaetigt(false); setFehler(null); setStatus('idle')
+  }
 
   function waehleDatei() {
     // Bewusst immer der native <input type="file"> – ein fruehrer Versuch, den Tauri-Dialog
     // per fetch("file://…") auszulesen, schlug unter Linux (WebKitGTK) mit "Load failed" fehl.
     fileInputRef.current?.click()
+  }
+
+  async function pruefen() {
+    if (!datei || !kannPruefen) return
+    setStatus('prueft'); setFehler(null)
+    try {
+      setPruefung(await pruefeBackup(datei, istVerschluesselt ? passwort : undefined))
+      setStatus('idle')
+    } catch (e) {
+      setFehler(e instanceof Error ? e.message : 'Unbekannter Fehler')
+      setStatus('err')
+    }
   }
 
   async function wiederherstellen() {
@@ -88,7 +110,7 @@ export function BackupZipWiederherstellen() {
         ) : (
           <div className="space-y-4">
             <input ref={fileInputRef} type="file" accept=".zip,.zip.enc" className="hidden"
-              onChange={e => { setDatei(e.target.files?.[0] ?? null); setPasswort('') }} />
+              onChange={e => { setDatei(e.target.files?.[0] ?? null); setPasswort(''); setzePruefungZurueck() }} />
 
             <div className="flex items-center gap-3">
               <button type="button" onClick={waehleDatei}
@@ -112,7 +134,7 @@ export function BackupZipWiederherstellen() {
                   <input
                     type={zeigPasswort ? 'text' : 'password'}
                     value={passwort}
-                    onChange={e => setPasswort(e.target.value)}
+                    onChange={e => { setPasswort(e.target.value); setzePruefungZurueck() }}
                     placeholder="Passwort das beim Backup gesetzt wurde"
                     className={`${inputCls} pr-24`}
                   />
@@ -124,12 +146,54 @@ export function BackupZipWiederherstellen() {
               </div>
             )}
 
+            {pruefung && (
+              <div className="space-y-3 text-sm">
+                {pruefung.metadaten ? (
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 border border-slate-200 dark:border-slate-700 rounded-lg px-4 py-3 text-slate-700 dark:text-slate-200">
+                    <dt className="text-slate-500 dark:text-slate-400">Erstellt</dt>
+                    <dd>{new Date(pruefung.metadaten.completed_at).toLocaleString('de-DE')}</dd>
+                    <dt className="text-slate-500 dark:text-slate-400">Art</dt>
+                    <dd>{backupTypLabel(pruefung.metadaten.backup_type)}</dd>
+                    <dt className="text-slate-500 dark:text-slate-400">Profil</dt>
+                    <dd>{pruefung.metadaten.profile_name ?? 'Unbekannt'}</dd>
+                    <dt className="text-slate-500 dark:text-slate-400">Version</dt>
+                    <dd>{pruefung.metadaten.app_version}</dd>
+                  </dl>
+                ) : (
+                  <p className="text-slate-500 dark:text-slate-400">Metadaten nicht vorhanden</p>
+                )}
+                {pruefung.blockaden.map(b => (
+                  <p key={b.code} className="text-red-600 dark:text-red-400">{b.meldung}</p>
+                ))}
+                {pruefung.warnungen.map(w => (
+                  <p key={w.code} className="text-amber-700 dark:text-amber-300">⚠ {w.meldung}</p>
+                ))}
+                {pruefung.infos.map(i => (
+                  <p key={i.code} className="text-slate-500 dark:text-slate-400">{i.meldung}</p>
+                ))}
+                {hatWarnungen && pruefung.blockaden.length === 0 && (
+                  <label className="flex items-center gap-2 text-slate-700 dark:text-slate-200">
+                    <input type="checkbox" checked={warnungenBestaetigt}
+                      onChange={e => setWarnungenBestaetigt(e.target.checked)} />
+                    Ich habe die Hinweise gelesen und möchte dieses Backup einspielen.
+                  </label>
+                )}
+              </div>
+            )}
+
             {fehler && <p className="text-sm text-red-600 dark:text-red-400">{fehler}</p>}
 
-            <button onClick={wiederherstellen} disabled={!kannWiederherstellen || status === 'uploading'}
-              className="px-5 py-2 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg">
-              {status === 'uploading' ? 'Wird verarbeitet…' : 'Backup hochladen und vorbereiten'}
-            </button>
+            {pruefung ? (
+              <button onClick={wiederherstellen} disabled={!kannWiederherstellen || status === 'uploading'}
+                className="px-5 py-2 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg">
+                {status === 'uploading' ? 'Wird verarbeitet…' : 'Backup hochladen und vorbereiten'}
+              </button>
+            ) : (
+              <button onClick={pruefen} disabled={!kannPruefen || status === 'prueft'}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg">
+                {status === 'prueft' ? 'Wird geprüft…' : 'Backup prüfen'}
+              </button>
+            )}
           </div>
         )}
       </div>

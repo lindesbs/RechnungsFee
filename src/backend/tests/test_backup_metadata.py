@@ -377,3 +377,36 @@ def test_backup_ohne_uploads_warnt():
     ergebnis = _pruefe(_archiv_mit_manifest(uploads=False))
 
     assert "nur_datenbank" in _codes(ergebnis.warnungen)
+
+
+def test_laufwerk_in_unterordner_gilt_als_unsicherer_pfad():
+    puffer = io.BytesIO()
+    with zipfile.ZipFile(puffer, "w") as zf:
+        zf.writestr("rechnungsfee.db", b"x")
+        zf.writestr("uploads/ordner/C:/escape.txt", b"nope")
+    with zipfile.ZipFile(io.BytesIO(puffer.getvalue())) as zf:
+        ergebnis = bm.pruefe_archiv(zf, schema_version=1)
+    assert "unsicherer_pfad" in [b["code"] for b in ergebnis.blockaden]
+
+
+def test_lies_profile_id_legt_keine_datei_an(tmp_path):
+    assert bm.lies_profile_id(tmp_path) is None
+    assert not (tmp_path / bm.PROFILE_ID_DATEI).exists()
+
+
+def test_verlauf_eintrag_uebernimmt_die_felder_aus_dem_manifest():
+    manifest = bm.erstelle_manifest(
+        backup_type="exit", app_version="0.7.8", schema_version=181, profile_id="p",
+        profile_name="Standard", created_at="2026-11-07T19:45:00Z",
+        completed_at="2026-11-07T19:45:06Z", contents={}, integrity_files={"a": "b"})
+
+    eintrag = bm.verlauf_eintrag(manifest, dateiname="x.zip.enc", ort="extern", ziel="/mnt/nas",
+                                 umfang="voll", groesse=7)
+
+    assert eintrag == {
+        "backup_id": manifest["backup_id"], "dateiname": "x.zip.enc", "ort": "extern",
+        "ziel": "/mnt/nas", "backup_type": "exit", "umfang": "voll",
+        "created_at": "2026-11-07T19:45:00Z", "completed_at": "2026-11-07T19:45:06Z",
+        "app_version": "0.7.8", "schema_version": 181, "profile_id": "p", "groesse": 7,
+        "integrity": manifest["integrity"],
+    }

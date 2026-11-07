@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { downloadBackup, getUnternehmen, updateUnternehmen, getBackupListe, wiederherstellenLokal, isTauri, getProfile } from '../../api/client'
 import type { BackupEintrag } from '../../api/client'
 import { useMxAuto } from '../../hooks/useAnsicht'
+import { backupOrtLabel, backupTypLabel, backupUmfangLabel } from '../../utils/backupLabels'
 import { BackupZipWiederherstellen } from '../../components/BackupZipWiederherstellen'
 
 type TabId = 'backup' | 'wiederherstellung'
@@ -440,24 +441,43 @@ function LokaleBackupListe({ onErfolg }: { onErfolg: () => void }) {
     <div className="space-y-3">
       <div className="divide-y divide-slate-100 dark:divide-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
         {liste.map(eintrag => (
-          <div key={eintrag.dateiname}
+          <div key={`${eintrag.ort}-${eintrag.ziel}-${eintrag.dateiname}`}
             className={`flex items-center justify-between px-4 py-3 text-sm transition-colors ${
-              selected?.dateiname === eintrag.dateiname
+              eintrag.wiederherstellbar && selected?.dateiname === eintrag.dateiname
                 ? 'bg-orange-50 dark:bg-orange-950'
                 : 'bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750'
             }`}>
             <div className="space-y-0.5 min-w-0">
-              <p className="font-medium text-slate-800 dark:text-slate-100 truncate">
+              <p className="font-medium text-slate-800 dark:text-slate-100 truncate flex items-center gap-2">
                 {formatTimestamp(eintrag.timestamp)}
+                {eintrag.ist_neueste_vollsicherung && (
+                  <span className="shrink-0 text-xs font-normal bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded">
+                    Neueste Vollsicherung
+                  </span>
+                )}
               </p>
               <p className="text-xs text-slate-400 font-mono">{eintrag.dateiname} · {formatBytes(eintrag.groesse)}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {eintrag.hat_metadaten
+                  ? [
+                      backupTypLabel(eintrag.backup_type),
+                      backupUmfangLabel(eintrag.umfang),
+                      backupOrtLabel(eintrag.ort),
+                      eintrag.app_version && `Version ${eintrag.app_version}`,
+                    ].filter(Boolean).join(' · ')
+                  : 'Metadaten nicht vorhanden'}
+              </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setSelected(selected?.dateiname === eintrag.dateiname ? null : eintrag)}
-              className="ml-3 shrink-0 px-3 py-1.5 text-xs border border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-300 rounded-lg hover:bg-orange-50 dark:hover:bg-orange-950 transition-colors">
-              Auswählen
-            </button>
+            {eintrag.wiederherstellbar ? (
+              <button
+                type="button"
+                onClick={() => setSelected(selected?.dateiname === eintrag.dateiname ? null : eintrag)}
+                className="ml-3 shrink-0 px-3 py-1.5 text-xs border border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-300 rounded-lg hover:bg-orange-50 dark:hover:bg-orange-950 transition-colors">
+                Auswählen
+              </button>
+            ) : (
+              <span className="ml-3 shrink-0 text-xs text-slate-400">Einspielen per Upload</span>
+            )}
           </div>
         ))}
       </div>

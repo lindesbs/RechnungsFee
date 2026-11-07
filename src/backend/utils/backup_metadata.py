@@ -50,12 +50,16 @@ def setze_profile_id(profil_dir: Path, profile_id: str) -> None:
     schreibe_atomar(profil_dir / PROFILE_ID_DATEI, profile_id.encode("utf-8"))
 
 
-def lade_oder_erzeuge_profile_id(profil_dir: Path) -> str:
-    pfad = profil_dir / PROFILE_ID_DATEI
+def lies_profile_id(profil_dir: Path) -> str | None:
+    """Legt nichts an: Die Prüfung eines Backups darf keine Spuren hinterlassen."""
     try:
-        vorhanden = pfad.read_text(encoding="utf-8").strip()
+        return (profil_dir / PROFILE_ID_DATEI).read_text(encoding="utf-8").strip() or None
     except OSError:
-        vorhanden = ""
+        return None
+
+
+def lade_oder_erzeuge_profile_id(profil_dir: Path) -> str:
+    vorhanden = lies_profile_id(profil_dir)
     if vorhanden:
         return vorhanden
     neu = str(uuid.uuid4())
@@ -151,6 +155,25 @@ def verlauf_anhaengen(pfad: Path, eintrag: dict,
     schreibe_atomar(pfad, inhalt.encode("utf-8"))
 
 
+def verlauf_eintrag(manifest: dict, *, dateiname: str, ort: str, ziel: str | None,
+                    umfang: str, groesse: int) -> dict:
+    return {
+        "backup_id": manifest["backup_id"],
+        "dateiname": dateiname,
+        "ort": ort,
+        "ziel": ziel,
+        "backup_type": manifest["backup_type"],
+        "umfang": umfang,
+        "created_at": manifest["created_at"],
+        "completed_at": manifest["completed_at"],
+        "app_version": manifest["app_version"],
+        "schema_version": manifest["schema_version"],
+        "profile_id": manifest["profile_id"],
+        "groesse": groesse,
+        "integrity": manifest["integrity"],
+    }
+
+
 def _sortierschluessel(eintrag: dict) -> tuple:
     zeitpunkt = parse_zeitpunkt(eintrag.get("completed_at"))
     return (
@@ -226,7 +249,8 @@ def _ist_unsicherer_upload_pfad(name: str) -> bool:
     relativ = PurePosixPath(name[len("uploads/"):].replace("\\", "/"))
     if relativ.is_absolute() or ".." in relativ.parts:
         return True
-    return bool(relativ.parts) and re.match(r"^[A-Za-z]:", relativ.parts[0]) is not None
+    # Jeder Teil zählt: joinpath springt unter Windows auch bei ordner/C:/datei aufs Laufwerk.
+    return any(re.match(r"^[A-Za-z]:", teil) for teil in relativ.parts)
 
 
 def _lies_root_manifest(zf: zipfile.ZipFile, namen: set[str], ergebnis: Pruefergebnis) -> dict | None:

@@ -8,26 +8,30 @@ RechnungsFee erkennt das neueste passende Backup unabhängig von Dateiname und
 Speicherort und zeigt vor dem Wiederherstellen dessen Metadaten an. Backups ohne
 Metadaten bleiben wiederherstellbar.
 
-## Abhängigkeit
+## Basis
 
-Das Design setzt auf der noch nicht committeten SQL-Treiber-Arbeit auf
-(`database/portable_backup.py`, Testdaten-Isolation in `tests/conftest.py`). Nur
-`utils/backup_metadata.py` ist davon unabhängig. Alle Änderungen an `main.py`,
-`api/backup.py` und `portable_backup.py` folgen, sobald diese Arbeit committet ist
-und der Branch darauf aufgesetzt wurde.
+Der Branch setzt auf dem originalen `main` auf und ist unabhängig von
+`feature/sql-datenbanktreiber`. Hier gibt es deshalb nur das Format `sqlite`. Das
+Kernmodul erkennt portable Backups bereits, `main.py` lehnt sie ohne die SQL-Arbeit aber
+mit `keine_datenbank` ab. Treffen beide Branches zusammen, müssen `portable_backup.py`
+und die neue ZIP-Erstellung beim Merge zusammengeführt werden.
 
-Backend-Tests, die `database.connection` importieren, dürfen vorher nicht laufen:
-Ohne die Isolation schreiben sie in das echte Profil.
+Auf `main` fehlt die Testdaten-Isolation, sie liegt im SQL-Branch. Backend-Tests, die
+`database.connection` importieren, laufen hier deshalb nur mit temporärem `HOME`:
+
+```bash
+HOME=$(mktemp -d) python -m pytest tests
+```
 
 ## Bausteine
 
 | Baustein | Aufgabe |
 |---|---|
-| Root-`manifest.json` | Liegt in jedem ZIP (SQLite und portabel), letzter Eintrag des Archivs. `database/manifest.json` bleibt unverändert. |
+| Root-`manifest.json` | Liegt in jedem ZIP, letzter Eintrag des Archivs. |
 | `backups/backup-verlauf.jsonl` | Lokaler Verlauf. Jedes Backup hängt eine Zeile an, auch externe und Downloads. |
 | `profil_id.txt` im Profilordner | Stabile Profilkennung. Wird beim ZIP-Restore aus dem Manifest übernommen. |
 | `utils/backup_metadata.py` | Manifest, Verlauf, Profilkennung, Sortierung, Archivprüfung. Kein Zugriff auf Datenbank oder API. |
-| Gemeinsame ZIP-Erstellung | Ersetzt die doppelte Logik in `main.py` und `api/backup.py`. |
+| `utils/backup_zip.py` | Gemeinsame ZIP-Erstellung für `main.py` und `api/backup.py`, Verlaufseinträge. Liest den Schema-Stand aus der Datei, weil `api/backup.py` `main` nicht importieren kann. |
 
 Der Verlauf ist bewusst eine Datei und keine Tabelle: Ein Restore überschreibt die
 Datenbank, `backups/` bleibt dabei unberührt und ist bereits pro Profil getrennt.
@@ -57,7 +61,7 @@ Profil“.
 ```
 
 - `backup_type`: `manual`, `exit`, `pre_migration`, `pre_restore`.
-- `contents.format`: `sqlite` oder `portable`.
+- `contents.format`: `sqlite`, später auch `portable`.
 - `integrity.files`: Pfad und SHA-256 der Datenbankinhalte. Uploads sichert die
   CRC-Prüfung des ZIP.
 - Kein `status`: Dateien entstehen atomar (temporäre Datei, dann umbenennen). Was
@@ -151,7 +155,7 @@ Frontend. Lokal gilt `dev`.
 - Manifest: beschädigt, fehlend, verändert, neuere Version
 - Verlauf: kaputte Zeilen, Kürzung, Sortierung bei Gleichstand
 - Restore: Blockaden, Warnungen, alte Backups ohne Manifest, Zip-Slip
-- Erstellung: Round-Trip für SQLite und portabel, Übernahme der Profilkennung
+- Erstellung: Round-Trip für SQLite, Übernahme der Profilkennung
 
 ## Akzeptanzkriterien
 
@@ -166,6 +170,6 @@ Frontend. Lokal gilt `dev`.
 
 ## Bekannte Folgearbeit außerhalb dieser Änderung
 
-`_pruefe_manifest` in `portable_backup.py` verlangt exakt dieselbe Schemaversion.
+`_pruefe_manifest` in `portable_backup.py` (Branch `feature/sql-datenbanktreiber`) verlangt exakt dieselbe Schemaversion.
 Portable Backups wären damit nach jeder Schemaänderung nicht mehr einspielbar. Das
 gehört zur SQL-Treiber-Arbeit und sollte vor deren Release gelöst sein.

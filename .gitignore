@@ -172,3 +172,6 @@ exports/
 *.Zone.Identifier
 .claude/settings.json
 *Zone.Identifier
+
+# Vom Build erzeugt (build.yml)
+src/backend/_app_version.py

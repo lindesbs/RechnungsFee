@@ -75,6 +75,11 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      # Die Version in tauri.conf.json wird erst nach dem Sidecar-Bau gesetzt
+      - name: App-Version für den Sidecar festschreiben
+        shell: bash
+        run: echo "APP_VERSION = \"${GITHUB_REF_NAME#v}\"" > src/backend/_app_version.py
+
       - name: Backend-Sidecar bauen (Linux)
         if: matrix.platform == 'ubuntu-22.04'
         run: bash scripts/build-sidecar.sh
